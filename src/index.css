@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Primary Colors */
+  --color-primary: #c25a3a;         /* Main terracotta */
+  --color-primary-light: #e67e5c;   /* Lighter terracotta for hover states */
+  --color-primary-dark: #9c4531;    /* Darker terracotta for active states */
+  --color-accent: #5e8b7e;          /* Complementary sage green */
+  
+  /* Neutral Colors */
+  --color-bg-primary: #f7f3ee;      /* Warm off-white for backgrounds */
+  --color-bg-secondary: #ffffff;    /* White for cards and components */
+  --color-border: #e2d9d0;          /* Subtle warm gray for borders */
+  
+  /* Text Colors */
+  --color-text-primary: #332a20;    /* Deep brown for main text */
+  --color-text-secondary: #6b5c4c;  /* Medium brown for secondary text */
+  --color-text-light: #ffffff;      /* White text for dark backgrounds */
+  
+  /* Functional Colors */
+  --color-success: #5e8b7e;         /* Green for success states */
+  --color-warning: #e9b872;         /* Amber for warnings */
+  --color-error: #d95550;           /* Warm red for errors */
+  
+  /* Opacity Variants */
+  --color-primary-15: rgba(194, 90, 58, 0.15);
+  --color-primary-25: rgba(194, 90, 58, 0.25);
+  --color-success-15: rgba(94, 139, 126, 0.15);
+  --color-warning-15: rgba(233, 184, 114, 0.15);
+  --color-error-15: rgba(217, 85, 80, 0.15);
+  
+  /* Component-specific */
+  --card-border-radius: 10px;
+  --button-border-radius: 20px;
+  --input-border-radius: 8px;
+  
+  /* Shadows */
+  --shadow-sm: 0 2px 4px rgba(74, 60, 49, 0.05);
+  --shadow-md: 0 4px 8px rgba(74, 60, 49, 0.1);
+  --shadow-lg: 0 8px 16px rgba(74, 60, 49, 0.15);
+  
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+}
+
+/* Base styles */
+body {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/* Button styles */
+button {
+  transition: all var(--transition-fast);
+}
+
+/* Input range styling */
+input[type="range"] {
+  height: 6px;
+  background-color: var(--color-border);
+  border-radius: 3px;
+  transition: all 0.2s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  background-color: var(--color-primary);
+  border: 2px solid var(--color-bg-secondary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background-color: var(--color-primary-light);
+}
+
+/* Animation for toast */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+/* Add these styles for enhanced icon effects */
+@keyframes pulse-glow {
+  0% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.2);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+.icon-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Add smooth transitions for hover effects */
+.icon-container {
+  transition: all 0.3s ease;
+}
+
+.icon-container:hover {
+  transform: translateY(-2px);
+}
