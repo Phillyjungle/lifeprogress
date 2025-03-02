@@ -49,14 +49,14 @@ export function AnalyticsInsights({
       const isDark = document.documentElement.classList.contains('dark-theme');
       setIsLightTheme(!isDark);
     };
-
+    
     checkTheme();
     const observer = new MutationObserver(checkTheme);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class']
+    observer.observe(document.documentElement, { 
+      attributes: true, 
+      attributeFilter: ['class'] 
     });
-
+    
     return () => observer.disconnect();
   }, []);
 
@@ -171,17 +171,17 @@ export function AnalyticsInsights({
           const currentValue = domainData ? getDomainValue(domainData, domain) : null;
           const status = determineStatus(domain, currentValue, recentChange);
           const Icon = config.icon;
-
+          
           return (
-            <div
-              key={domain}
+            <div 
+              key={domain} 
               className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm"
-              style={{
+              style={{ 
                 borderLeft: `4px solid ${getDomainColor(domain)}`
               }}
             >
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center">
+                  <div className="flex items-center">
                   <div
                     className="w-8 h-8 rounded-full flex items-center justify-center mr-3"
                     style={{ backgroundColor: `${getDomainColor(domain)}20` }}
@@ -248,8 +248,8 @@ export function AnalyticsInsights({
               const sourceLabel = getDomainLabel(correlation.source);
               const targetLabel = getDomainLabel(correlation.target);
               const strengthClass = correlation.strength >= 0.7 ? 'text-green-600' : 'text-blue-600';
-
-              return (
+            
+            return (
                 <div key={index} className="flex items-start space-x-3">
                   <div className={`mt-1 ${strengthClass}`}>
                     {correlation.positive ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
@@ -260,11 +260,11 @@ export function AnalyticsInsights({
                     {correlation.positive ? 'positive' : 'negative'} correlation
                     {correlation.strength >= 0.7 ? ' (strong)' : ' (moderate)'}.
                   </p>
-                </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
         </div>
+      </div>
       )}
     </div>
   );
@@ -273,5 +273,5 @@ export function AnalyticsInsights({
 function determineStatus(domain: DomainKey, currentValue: number | null, recentChange: DomainChange | null): 'No Data' | 'Improving' | 'Declining' | 'Stable' {
   if (!currentValue) return 'No Data';
   if (!recentChange || recentChange.domain !== domain) return 'Stable';
-  return recentChange.difference > 0 ? 'Improving' : 'Declining';
-}
+    return recentChange.difference > 0 ? 'Improving' : 'Declining';
+} 
