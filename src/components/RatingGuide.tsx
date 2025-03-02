@@ -291,6 +291,42 @@ const RatingGuide = ({ initialTab = "physical_health", onClose }: { initialTab?:
     ]
   };
 
+  // Define color classes for different rating levels
+  const getRatingColorClasses = (range: string) => {
+    switch (range) {
+      case "9-10":
+        return "bg-green-50 border-green-200";
+      case "7-8":
+        return "bg-blue-50 border-blue-200";
+      case "5-6":
+        return "bg-yellow-50 border-yellow-200";
+      case "3-4":
+        return "bg-orange-50 border-orange-200";
+      case "0-2":
+        return "bg-red-50 border-red-200";
+      default:
+        return "bg-gray-50 border-gray-200";
+    }
+  };
+
+  // Define text color classes for different rating levels
+  const getRatingTextClasses = (range: string) => {
+    switch (range) {
+      case "9-10":
+        return "text-green-800";
+      case "7-8":
+        return "text-blue-800";
+      case "5-6":
+        return "text-yellow-800";
+      case "3-4":
+        return "text-orange-800";
+      case "0-2":
+        return "text-red-800";
+      default:
+        return "text-gray-800";
+    }
+  };
+
   return (
     <div className="w-full max-w-4xl mx-auto p-4">
       <Card className="mb-6">
@@ -325,19 +361,32 @@ const RatingGuide = ({ initialTab = "physical_health", onClose }: { initialTab?:
           <TabsContent key={area} value={area}>
             <div className="space-y-4">
               {levels.map((level, index) => (
-                <Card key={index}>
-                  <CardHeader>
-                    <CardTitle className="text-lg">
-                      Level {level.range}
+                <Card 
+                  key={index} 
+                  className={`border ${getRatingColorClasses(level.range)}`}
+                >
+                  <CardHeader className={`border-b ${getRatingColorClasses(level.range)}`}>
+                    <CardTitle className={`text-lg font-bold ${getRatingTextClasses(level.range)}`}>
+                      {level.range} - {level.range === "9-10" ? "Exceptional" : 
+                                      level.range === "7-8" ? "Very Good" : 
+                                      level.range === "5-6" ? "Average" : 
+                                      level.range === "3-4" ? "Below Average" : 
+                                      "Struggling"}
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <p className="mb-4 text-gray-700">{level.description}</p>
+                  <CardContent className="pt-4">
+                    <p className="mb-4 font-medium text-gray-800">{level.description}</p>
                     <div className="space-y-2">
                       {level.indicators.map((indicator, i) => (
                         <div key={i} className="flex items-center">
-                          <span className="w-2 h-2 bg-indigo-500 rounded-full mr-2"></span>
-                          <span>{indicator}</span>
+                          <span className={`w-2 h-2 rounded-full mr-2 ${
+                            level.range === "9-10" ? "bg-green-500" : 
+                            level.range === "7-8" ? "bg-blue-500" : 
+                            level.range === "5-6" ? "bg-yellow-500" : 
+                            level.range === "3-4" ? "bg-orange-500" : 
+                            "bg-red-500"
+                          }`}></span>
+                          <span className="text-gray-800">{indicator}</span>
                         </div>
                       ))}
                     </div>

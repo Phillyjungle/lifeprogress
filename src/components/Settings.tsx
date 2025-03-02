@@ -6,6 +6,7 @@ import {
   Activity, Brain, Users, Briefcase, Star
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
+import { useNavigate } from 'react-router-dom';
 
 // Domain configuration for consistent styling
 const DOMAIN_CONFIG = {
@@ -41,11 +42,41 @@ const DOMAIN_CONFIG = {
   }
 };
 
+type SectionRefs = {
+  profile: React.RefObject<HTMLDivElement>;
+  notifications: React.RefObject<HTMLDivElement>;
+  appearance: React.RefObject<HTMLDivElement>;
+  domains: React.RefObject<HTMLDivElement>;
+  data: React.RefObject<HTMLDivElement>;
+  account: React.RefObject<HTMLDivElement>;
+};
+
+type DomainKey = keyof typeof DOMAIN_CONFIG;
+
+type DomainPreferences = {
+  [K in DomainKey]: boolean;
+};
+
+type Settings = {
+  emailNotifications: boolean;
+  pushNotifications: boolean;
+  weeklyReports: boolean;
+  reminderTime: string;
+  dataPrivacy: string;
+  domainPreferences: DomainPreferences;
+};
+
+type IconProps = React.SVGProps<SVGSVGElement> & {
+  className?: string;
+  style?: React.CSSProperties;
+};
+
 export function Settings() {
-  const { theme, setTheme, profile, updateProfile, setShowAccountModal } = useUser();
+  const { theme, setTheme, profile, updateProfile, setShowAccountModal, signOut } = useUser();
+  const navigate = useNavigate();
   
   // State for settings
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<Settings>({
     emailNotifications: true,
     pushNotifications: true,
     weeklyReports: true,
@@ -67,7 +98,7 @@ export function Settings() {
   const [animateSection, setAnimateSection] = useState<string | null>(null);
   
   // Refs for animations
-  const sectionRefs = {
+  const sectionRefs: SectionRefs = {
     profile: useRef<HTMLDivElement>(null),
     notifications: useRef<HTMLDivElement>(null),
     appearance: useRef<HTMLDivElement>(null),
@@ -76,8 +107,40 @@ export function Settings() {
     account: useRef<HTMLDivElement>(null)
   };
   
+  // Add this to your component
+  const signOutButtonRef = useRef(null);
+  
+  // Add this effect to your component
+  useEffect(() => {
+    // This will run after the component mounts
+    console.log("Setting up direct event listener");
+    
+    // Wait a bit to ensure the DOM is fully rendered
+    setTimeout(() => {
+      // Find the button using a data attribute
+      const signOutButton = document.querySelector('button[data-testid="sign-out-button"]');
+      
+      if (signOutButton) {
+        console.log("Found sign out button:", signOutButton);
+        
+        // Add a direct DOM event listener
+        signOutButton.addEventListener('click', function(e) {
+          console.log("Sign out button clicked via direct DOM listener");
+          e.preventDefault();
+          e.stopPropagation();
+          
+          // Clear storage and redirect
+          localStorage.clear();
+          window.location.href = '/';
+        });
+      } else {
+        console.error("Could not find sign out button in DOM");
+      }
+    }, 1000);
+  }, []);
+  
   // Handle navigation to sections with animation
-  const navigateToSection = (section: string) => {
+  const navigateToSection = (section: keyof SectionRefs) => {
     setActiveSection(section);
     setAnimateSection(section);
     
@@ -110,7 +173,7 @@ export function Settings() {
   };
   
   // Toggle domain preference
-  const toggleDomain = (domain: string) => {
+  const toggleDomain = (domain: DomainKey) => {
     setSettings({
       ...settings,
       domainPreferences: {
@@ -137,6 +200,22 @@ export function Settings() {
       // Save settings to localStorage
       localStorage.setItem('settings', JSON.stringify(settings));
     }, 1200);
+  };
+  
+  const handleSignOut = () => {
+    // Clear user data from context
+    signOut();
+    
+    // Clear localStorage
+    localStorage.removeItem('userData');
+    localStorage.removeItem('userSettings');
+    localStorage.removeItem('progressEntries');
+    
+    // Navigate to home or login page
+    navigate('/');
+    
+    // Reload to ensure clean state (optional)
+    // window.location.reload();
   };
   
   return (
@@ -234,11 +313,11 @@ export function Settings() {
             <div className="mb-8 flex flex-col md:flex-row items-start md:items-center gap-6">
               <div className="relative group">
                 <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden border-4 border-white shadow-sm">
-                  {profile.avatar ? (
-                    <img src={profile.avatar} alt={profile.name} className="w-full h-full object-cover" />
+                  {profile?.avatar ? (
+                    <img src={profile.avatar} alt={profile?.name || 'User'} className="w-full h-full object-cover" />
                   ) : (
                     <div className="text-3xl font-semibold text-gray-400">
-                      {profile.name?.charAt(0) || 'U'}
+                      {profile?.name?.charAt(0) || 'U'}
                     </div>
                   )}
                 </div>
@@ -253,7 +332,7 @@ export function Settings() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                     <input 
                       type="text" 
-                      value={profile.name} 
+                      value={profile?.name || ''} 
                       onChange={(e) => handleProfileUpdate('name', e.target.value)}
                       className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)] outline-none transition-colors"
                     />
@@ -263,7 +342,7 @@ export function Settings() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
                     <input 
                       type="email" 
-                      value={profile.email} 
+                      value={profile?.email || ''} 
                       onChange={(e) => handleProfileUpdate('email', e.target.value)}
                       className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)] outline-none transition-colors"
                     />
@@ -272,7 +351,7 @@ export function Settings() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
                     <textarea 
-                      value={profile.bio} 
+                      value={profile?.bio || ''} 
                       onChange={(e) => handleProfileUpdate('bio', e.target.value)}
                       rows={3}
                       className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)] outline-none transition-colors"
@@ -446,12 +525,12 @@ export function Settings() {
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input 
                       type="checkbox" 
-                      checked={settings.domainPreferences[domain]} 
-                      onChange={() => toggleDomain(domain)}
+                      checked={settings.domainPreferences[domain as DomainKey]} 
+                      onChange={() => toggleDomain(domain as DomainKey)}
                       className="sr-only peer" 
                     />
                     <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gray-800"
-                         style={{ backgroundColor: settings.domainPreferences[domain] ? config.color : 'rgba(0,0,0,0.1)' }}></div>
+                         style={{ backgroundColor: settings.domainPreferences[domain as DomainKey] ? config.color : 'rgba(0,0,0,0.1)' }}></div>
                   </label>
                 </div>
               ))}
@@ -497,7 +576,12 @@ export function Settings() {
               </div>
               
               <div className="border-t border-gray-200 pt-4">
-                <button className="flex items-center justify-center p-3 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors w-full md:w-auto">
+                <button 
+                  ref={signOutButtonRef}
+                  onClick={handleSignOut}
+                  data-testid="sign-out-button"
+                  className="flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors w-full md:w-auto"
+                >
                   <AlertTriangle className="w-5 h-5 mr-2" />
                   <span>Delete All Data</span>
                 </button>
@@ -536,7 +620,11 @@ export function Settings() {
                     <span>Create Account</span>
                   </button>
                   
-                  <button className="flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors w-full md:w-auto">
+                  <button 
+                    onClick={handleSignOut}
+                    data-testid="sign-out-button"
+                    className="flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors w-full md:w-auto"
+                  >
                     <LogOut className="w-5 h-5 mr-2" />
                     <span>Sign Out</span>
                   </button>
@@ -594,8 +682,7 @@ export function Settings() {
   );
 }
 
-// Missing icon components for the Data Management section
-function Download(props) {
+function Download(props: IconProps) {
   return (
     <svg 
       xmlns="http://www.w3.org/2000/svg" 
@@ -616,7 +703,7 @@ function Download(props) {
   );
 }
 
-function Upload(props) {
+function Upload(props: IconProps) {
   return (
     <svg 
       xmlns="http://www.w3.org/2000/svg" 

@@ -1,715 +1,424 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, 
-  Tooltip, ResponsiveContainer, Legend, AreaChart, Area, 
-  PieChart as RechartsPieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis
-} from 'recharts';
-import { 
-  Activity, Brain, Users, Briefcase, Star, 
-  Calendar, TrendingUp, TrendingDown, ChevronDown, 
-  ArrowUpRight, ArrowDownRight, Zap, Info, 
-  AlertTriangle, ThumbsUp, BarChart2, PieChart, RadioTower
-} from 'lucide-react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, BarChart, Bar } from 'recharts';
+import { DOMAIN_CONFIG } from '../config/domains';
+import { DomainData, DomainCorrelation, AnalysisResults, DomainInsight, DomainChange } from '../types/analytics';
+import { getDomainColor, getDomainLabel, calculateDomainVariability, formatDomainData, getDomainValue, DomainKey, DomainSelection, ALL_DOMAINS } from '../utils/domainUtils';
+import { calculateWeeklyAverages, calculateDomainCorrelations, filterEntriesByPeriod } from '../utils/analyticsUtils';
+import { Loader2, TrendingUp, TrendingDown, BarChart2, LineChart as LineChartIcon, ThumbsUp } from 'lucide-react';
 import { AnalyticsInsights } from './AnalyticsInsights';
 
-// Importing our domain configuration
-const DOMAIN_CONFIG = {
-  health: {
-    label: 'Physical Health',
-    color: '#4361ee',
-    icon: Activity,
-    iconBgColor: 'rgba(67, 97, 238, 0.1)'
-  },
-  mental: {
-    label: 'Mental Wellbeing',
-    color: '#4cc9f0',
-    icon: Brain,
-    iconBgColor: 'rgba(76, 201, 240, 0.1)'
-  },
-  social: {
-    label: 'Social Life',
-    color: '#ff8fab',
-    icon: Users,
-    iconBgColor: 'rgba(255, 143, 171, 0.1)'
-  },
-  career: {
-    label: 'Career Growth',
-    color: '#f77f00',
-    icon: Briefcase,
-    iconBgColor: 'rgba(247, 127, 0, 0.1)'
-  },
-  growth: {
-    label: 'Personal Growth',
-    color: '#2a9d8f',
-    icon: Star,
-    iconBgColor: 'rgba(42, 157, 143, 0.1)'
-  }
-};
+interface Props {
+  entries: DomainData[];
+}
 
-// Format date for display
-const formatDate = (dateStr) => {
-  if (!dateStr) return '';
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
+type ChartType = 'line' | 'bar';
 
-// Sample data generator function - replace with your actual data loading logic
-const generateSampleData = () => {
-  const today = new Date();
-  const data = [];
-  
-  for (let i = 30; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(today.getDate() - i);
-    
-    const entry = {
-      date: date.toISOString().split('T')[0],
-      health: 5 + Math.random() * 2 + (i < 15 ? 1 : 0),
-      mental: 6 + Math.random() * 2 - (i < 5 ? 1 : 0),
-      social: 4 + Math.random() * 3 + (i < 10 ? 1.5 : 0),
-      career: 7 + Math.random() * 1.5,
-      growth: 5 + Math.random() * 2 + (i < 20 ? 1 : 0)
-    };
-    
-    data.push(entry);
-  }
-  
-  return data;
-};
-
-export function Analytics() {
-  // State variables
-  const [period, setPeriod] = useState('month');
-  const [chartType, setChartType] = useState('line');
-  const [periodDropdownOpen, setPeriodDropdownOpen] = useState(false);
-  const [selectedDomain, setSelectedDomain] = useState('all');
-  const [isChartLoading, setIsChartLoading] = useState(false);
-  const [showChartAnimation, setShowChartAnimation] = useState(false);
-  const [domainInsights, setDomainInsights] = useState({});
-  const [domainTrends, setDomainTrends] = useState({});
-  const [weeklyAverages, setWeeklyAverages] = useState([]);
-  const [domainBalance, setDomainBalance] = useState([]);
-  const [correlationData, setCorrelationData] = useState([]);
-  const [rawData, setRawData] = useState([]);
-  const [previousData, setPreviousData] = useState([]);
-  const [recentChange, setRecentChange] = useState(null);
-  const [analysisResults, setAnalysisResults] = useState({
-    variabilityInsights: {},
+export const Analytics: React.FC<Props> = ({ entries }) => {
+  const [loading, setLoading] = useState(false);
+  const [selectedDomain, setSelectedDomain] = useState<DomainSelection>(ALL_DOMAINS);
+  const [chartType, setChartType] = useState<ChartType>('line');
+  const [domainInsights, setDomainInsights] = useState<Record<DomainKey, DomainInsight>>({} as Record<DomainKey, DomainInsight>);
+  const [recentChange, setRecentChange] = useState<DomainChange | null>(null);
+  const [analysisResults, setAnalysisResults] = useState<AnalysisResults>({
+    variabilityInsights: {} as Record<DomainKey, { level: 'low' | 'moderate' | 'high'; score: number; insight: string }>,
     correlations: [],
     suggestions: [],
     overallInsight: '',
-    topPerformingDomain: '',
-    needsAttentionDomain: ''
+    topPerformingDomain: null,
+    needsAttentionDomain: null
   });
-  
-  // Load data on component mount and when period changes
+
+  const weeklyData = useMemo(() => calculateWeeklyAverages(entries), [entries]);
+
+  const areaChartData = useMemo(() => {
+    return weeklyData.map((week: Record<string, any>) => ({
+      week: week.week,
+      ...Object.keys(DOMAIN_CONFIG).reduce<Record<DomainKey, number>>((acc, domain) => ({
+        ...acc,
+        [domain as DomainKey]: week[domain as DomainKey] || 0
+      }), {} as Record<DomainKey, number>)
+    }));
+  }, [weeklyData]);
+
+  // Filter domains based on selection
+  const visibleDomains = useMemo(() => {
+    if (selectedDomain === ALL_DOMAINS) {
+      return Object.keys(DOMAIN_CONFIG) as DomainKey[];
+    }
+    return [selectedDomain];
+  }, [selectedDomain]);
+
+  const renderDomainIcon = (domain: DomainKey) => {
+    const config = DOMAIN_CONFIG[domain];
+    const Icon = config.icon;
+    return (
+      <div 
+        className="rounded-full p-2" 
+        style={{ backgroundColor: config.color + '20' }}
+      >
+        {Icon && <Icon className="w-5 h-5" style={{ color: config.color }} />}
+      </div>
+    );
+  };
+
   useEffect(() => {
-    const loadAndProcessData = async () => {
-      setIsChartLoading(true);
-      
-      try {
-        // In a real app, you would load data from an API or local storage
-        // For this example, we'll use sample data
-        const data = generateSampleData();
-        
-        // Store the raw data
-        setRawData(data);
-        
-        // Generate domain insights
-        const insights = {};
-        const trends = {};
-        
-        // Process data for each domain
-        Object.keys(DOMAIN_CONFIG).forEach(domain => {
-          // Calculate domain insights
-          const values = data.map(entry => entry[domain]).filter(Boolean);
-          
-          if (values.length > 0) {
-            insights[domain] = {
-              peak: Math.max(...values),
-              average: values.reduce((sum, val) => sum + val, 0) / values.length,
-              min: Math.min(...values),
-              variability: calculateVariability(values)
-            };
-            
-            // Calculate trends
-            const current = values[values.length - 1];
-            const previous = values[values.length - 7] || values[0];
-            const percentChange = ((current - previous) / previous) * 100;
-            
-            trends[domain] = {
-              current,
-              previous,
-              percentChange,
-              improving: current > previous
-            };
-          }
-        });
-        
-        setDomainInsights(insights);
-        setDomainTrends(trends);
-        
-        // Calculate weekly averages
-        const weeks = {};
-        data.forEach(entry => {
-          const date = new Date(entry.date);
-          const weekNum = Math.floor(date.getTime() / (7 * 24 * 60 * 60 * 1000));
-          
-          if (!weeks[weekNum]) {
-            weeks[weekNum] = {
-              week: formatDate(entry.date),
-              counts: {},
-              sums: {}
-            };
-          }
-          
-          Object.keys(DOMAIN_CONFIG).forEach(domain => {
-            if (entry[domain]) {
-              if (!weeks[weekNum].counts[domain]) {
-                weeks[weekNum].counts[domain] = 0;
-                weeks[weekNum].sums[domain] = 0;
-              }
-              weeks[weekNum].counts[domain]++;
-              weeks[weekNum].sums[domain] += entry[domain];
-            }
-          });
-        });
-        
-        const weeklyData = Object.values(weeks).map(week => {
-          const result = { week: week.week };
-          
-          Object.keys(DOMAIN_CONFIG).forEach(domain => {
-            if (week.counts[domain] > 0) {
-              result[domain] = week.sums[domain] / week.counts[domain];
-            }
-          });
-          
-          return result;
-        });
-        
-        setWeeklyAverages(weeklyData);
-        
-        // Calculate domain balance data
-        const latestData = data[data.length - 1];
-        const balanceData = Object.entries(DOMAIN_CONFIG).map(([key, config]) => ({
-          name: config.label,
-          value: latestData[key] || 0,
-          color: config.color
-        }));
-        
-        setDomainBalance(balanceData);
-        
-        // Calculate correlation data
-        const domains = Object.keys(DOMAIN_CONFIG);
-        const correlations = [];
-        
-        for (let i = 0; i < domains.length; i++) {
-          for (let j = i + 1; j < domains.length; j++) {
-            const domain1 = domains[i];
-            const domain2 = domains[j];
-            
-            const values1 = data.map(entry => entry[domain1]).filter(Boolean);
-            const values2 = data.map(entry => entry[domain2]).filter(Boolean);
-            
-            // Only calculate if we have enough matching data points
-            if (values1.length >= 5 && values1.length === values2.length) {
-              const correlation = calculateCorrelation(values1, values2);
-              
-              if (Math.abs(correlation) > 0.3) {
-                correlations.push({
-                  source: domain1,
-                  target: domain2,
-                  correlation: correlation,
-                  strength: Math.abs(correlation),
-                  positive: correlation > 0
-                });
-              }
-            }
-          }
-        }
-        
-        // Set top correlations
-        setCorrelationData(correlations);
-        
-        // Calculate variability and domain analysis
-        const variabilityInsights = {};
-        let topPerformingDomain = '';
-        let topPerformingScore = 0;
-        let needsAttentionDomain = '';
-        let needsAttentionScore = 10;
-        
-        Object.entries(insights).forEach(([domain, data]) => {
-          let variabilityLevel = 'low';
-          if (data.variability > 1.5) variabilityLevel = 'high';
-          else if (data.variability > 0.7) variabilityLevel = 'moderate';
-          
-          variabilityInsights[domain] = {
-            level: variabilityLevel,
-            score: data.variability,
-            insight: getVariabilityInsight(domain, variabilityLevel)
-          };
-          
-          // Identify top performing and needs attention domains
-          if (trends[domain]?.current > topPerformingScore) {
-            topPerformingScore = trends[domain]?.current;
-            topPerformingDomain = domain;
-          }
-          
-          if (trends[domain]?.current < needsAttentionScore) {
-            needsAttentionScore = trends[domain]?.current;
-            needsAttentionDomain = domain;
-          }
-        });
-        
-        // Update analysis results
-        setAnalysisResults({
-          variabilityInsights,
-          correlations: [], // Would calculate correlations in a real app
-          suggestions: [
-            'Try to maintain a consistent sleep schedule to improve Physical Health stability',
-            'Regular social interactions, even brief ones, can boost your Social Life scores',
-            'Setting specific goals for Personal Growth can lead to more consistent progress'
-          ],
-          overallInsight: 'Your overall well-being is trending positively with good balance across domains.',
-          topPerformingDomain: topPerformingDomain,
-          needsAttentionDomain: needsAttentionDomain
-        });
-        
-        // Check for recent changes
-        if (previousData.length > 0 && data.length > 0) {
-          const latestData = data[data.length - 1];
-          const previousLatestData = previousData[previousData.length - 1];
-          
-          if (latestData && previousLatestData) {
-            // Compare domains to find changes
-            Object.keys(DOMAIN_CONFIG).forEach(domain => {
-              if (latestData[domain] !== undefined && previousLatestData[domain] !== undefined) {
-                const difference = latestData[domain] - previousLatestData[domain];
-                
-                // If change is significant, record it
-                if (Math.abs(difference) >= 1) {
-                  setRecentChange({
-                    domain,
-                    oldValue: previousLatestData[domain],
-                    newValue: latestData[domain],
-                    difference
-                  });
-                }
-              }
-            });
-          }
-        }
-        
-        // Store current data for future comparison
-        setPreviousData([...data]);
-      } catch (error) {
-        console.error('Error loading analytics data:', error);
-      } finally {
-        setIsChartLoading(false);
-        
-        // Show animation after a brief delay
-        setTimeout(() => {
-          setShowChartAnimation(true);
-        }, 400);
-        
-        setTimeout(() => {
-          setShowChartAnimation(false);
-        }, 2000);
-      }
+    const newCorrelations = calculateDomainCorrelations(entries);
+    const domains = Object.keys(DOMAIN_CONFIG) as DomainKey[];
+    
+    // Initialize variabilityInsights with default values for all domains
+    const variabilityInsights: Record<DomainKey, { level: 'low' | 'moderate' | 'high'; score: number; insight: string }> = {
+      health: { level: 'low', score: 0, insight: '' },
+      mental: { level: 'low', score: 0, insight: '' },
+      social: { level: 'low', score: 0, insight: '' },
+      career: { level: 'low', score: 0, insight: '' },
+      growth: { level: 'low', score: 0, insight: '' }
     };
     
-    loadAndProcessData();
-  }, [period]);
-  
-  // Calculate correlation between two sets of values
-  const calculateCorrelation = (x, y) => {
-    if (x.length !== y.length || x.length === 0) return 0;
+    // Calculate variability insights
+    domains.forEach(domain => {
+      const variability = calculateDomainVariability(entries, domain);
+      const domainLabel = getDomainLabel(domain).toLowerCase();
+      let insight = '';
+      
+      if (variability.level === 'high') {
+        insight = `Your ${domainLabel} shows significant variation. Consider establishing more consistent routines.`;
+      } else if (variability.level === 'moderate') {
+        insight = `Your ${domainLabel} has some fluctuation. Focus on maintaining stable practices.`;
+      } else {
+        insight = `Your ${domainLabel} is very stable. Keep up your consistent approach!`;
+      }
+      
+      variabilityInsights[domain] = {
+        level: variability.level,
+        score: variability.score,
+        insight
+      };
+    });
+
+    // Generate suggestions based on insights and variability
+    const suggestions = generateSuggestions(domainInsights, variabilityInsights);
+
+    // Find top performing and needs attention domains
+    let topPerformingDomain: DomainKey | null = null;
+    let needsAttentionDomain: DomainKey | null = null;
+    let maxScore = -1;
+    let minScore = 11;
+
+    domains.forEach(domain => {
+      const currentScore = entries[entries.length - 1]?.[domain] as number || 0;
+      if (currentScore > maxScore) {
+        maxScore = currentScore;
+        topPerformingDomain = domain;
+      }
+      if (currentScore < minScore && currentScore > 0) {
+        minScore = currentScore;
+        needsAttentionDomain = domain;
+      }
+    });
+
+    // Generate overall insight
+    const overallInsight = generateOverallInsight(domainInsights, variabilityInsights);
+
+    setAnalysisResults(prev => ({
+      ...prev,
+      variabilityInsights,
+      correlations: newCorrelations.map(corr => ({
+        source: corr.source as DomainKey,
+        target: corr.target as DomainKey,
+        correlation: corr.correlation,
+        strength: corr.strength >= 0.7 ? 1 : corr.strength >= 0.3 ? 0.5 : 0.2,
+        positive: corr.positive
+      })),
+      suggestions,
+      overallInsight,
+      topPerformingDomain,
+      needsAttentionDomain
+    }));
+
+    // Calculate domain insights
+    const insights: Record<DomainKey, DomainInsight> = {} as Record<DomainKey, DomainInsight>;
     
-    const n = x.length;
-    const sumX = x.reduce((a, b) => a + b, 0);
-    const sumY = y.reduce((a, b) => a + b, 0);
-    const sumXY = x.reduce((sum, xi, i) => sum + xi * y[i], 0);
-    const sumX2 = x.reduce((sum, xi) => sum + xi * xi, 0);
-    const sumY2 = y.reduce((sum, yi) => sum + yi * yi, 0);
-    
-    const numerator = n * sumXY - sumX * sumY;
-    const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
-    
-    return denominator === 0 ? 0 : numerator / denominator;
-  };
-  
-  // Calculate variability (standard deviation)
-  const calculateVariability = (values) => {
-    if (values.length < 2) return 0;
-    
-    const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
-    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-    return Math.sqrt(variance);
-  };
-  
-  // Get insight based on variability level
-  const getVariabilityInsight = (domain, level) => {
-    const domainLabel = DOMAIN_CONFIG[domain]?.label || domain;
-    
-    if (level === 'high') {
-      return `Your ${domainLabel} scores show high variability. Try to establish more consistent routines.`;
-    } else if (level === 'moderate') {
-      return `Your ${domainLabel} has moderate ups and downs. Work on stabilizing the most effective practices.`;
-    } else {
-      return `Your ${domainLabel} scores are very stable. You've found a consistent approach.`;
+    domains.forEach(domain => {
+      const currentEntry = entries[entries.length - 1];
+      const previousEntry = entries[entries.length - 2];
+      
+      const current = getDomainValue(currentEntry, domain) || 0;
+      const previous = previousEntry ? getDomainValue(previousEntry, domain) || 0 : current;
+      
+      const domainValues = entries
+        .map(entry => getDomainValue(entry, domain))
+        .filter((value): value is number => value !== null);
+      
+      const average = domainValues.length
+        ? domainValues.reduce((sum, val) => sum + val, 0) / domainValues.length
+        : 0;
+      
+      insights[domain] = {
+        trend: {
+          current,
+          previous,
+          change: current - previous
+        },
+        average,
+        variability: calculateDomainVariability(entries, domain).score
+      };
+    });
+
+    setDomainInsights(insights);
+
+    // Set recent change
+    if (entries.length >= 2) {
+      const latestEntry = entries[entries.length - 1];
+      const previousEntry = entries[entries.length - 2];
+      let maxChange = 0;
+      let changeDomain: DomainKey | null = null;
+      let oldValue = 0;
+      let newValue = 0;
+
+      domains.forEach(domain => {
+        const current = getDomainValue(latestEntry, domain);
+        const previous = getDomainValue(previousEntry, domain);
+        
+        if (current !== null && previous !== null) {
+          const change = Math.abs(current - previous);
+          if (change > maxChange) {
+            maxChange = change;
+            changeDomain = domain;
+            oldValue = previous;
+            newValue = current;
+          }
+        }
+      });
+
+      if (changeDomain) {
+        setRecentChange({
+          domain: changeDomain,
+          oldValue,
+          newValue,
+          difference: newValue - oldValue
+        });
+      }
     }
+
+    console.log('Analysis Results:', {
+      correlations: newCorrelations,
+      variabilityInsights,
+      suggestions,
+      overallInsight,
+      topPerformingDomain,
+      needsAttentionDomain
+    });
+  }, [entries]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
+      </div>
+    );
+  }
+
+  if (!entries.length) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-[var(--color-text-secondary)]">No data available yet. Start tracking your progress to see insights.</p>
+      </div>
+    );
+  }
+
+  const renderChart = () => {
+    const ChartComponent = chartType === 'line' ? LineChart : BarChart;
+    
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <ChartComponent data={areaChartData}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="week" />
+          <YAxis domain={[0, 10]} />
+          <Tooltip />
+          <Legend />
+          {visibleDomains.map((domain) => (
+            chartType === 'line' ? (
+              <Line
+                key={domain}
+                type="monotone"
+                dataKey={domain}
+                stroke={getDomainColor(domain)}
+                name={getDomainLabel(domain)}
+                strokeWidth={2}
+                dot={{ r: 4 }}
+                activeDot={{ r: 6 }}
+              />
+            ) : (
+              <Bar
+                key={domain}
+                dataKey={domain}
+                fill={getDomainColor(domain)}
+                name={getDomainLabel(domain)}
+              />
+            )
+          ))}
+        </ChartComponent>
+      </ResponsiveContainer>
+    );
   };
-  
+
   return (
-    <div className="py-6 px-4 analytics-container">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
-        <h1 className="text-2xl font-bold mb-4 md:mb-0">Analytics & Insights</h1>
-        
-        <div className="flex items-center space-x-4">
-          {/* Chart type selector */}
-          <div className="flex items-center bg-[var(--color-card)] rounded-lg p-1">
-            <button 
-              className={`p-2 rounded-md ${chartType === 'line' ? 'bg-[var(--color-primary-15)] text-[var(--color-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}
-              onClick={() => setChartType('line')}
-            >
-              <LineChart className="w-5 h-5" />
-            </button>
-            <button 
-              className={`p-2 rounded-md ${chartType === 'bar' ? 'bg-[var(--color-primary-15)] text-[var(--color-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}
-              onClick={() => setChartType('bar')}
-            >
-              <BarChart2 className="w-5 h-5" />
-            </button>
-            <button 
-              className={`p-2 rounded-md ${chartType === 'radar' ? 'bg-[var(--color-primary-15)] text-[var(--color-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text)]'}`}
-              onClick={() => setChartType('radar')}
-            >
-              <RadioTower className="w-5 h-5" />
-            </button>
-          </div>
-          
-          {/* Time period selector */}
-          <div className="relative">
-            <button 
-              className="flex items-center px-4 py-2 bg-[var(--color-card)] rounded-lg text-[var(--color-text)]"
-              onClick={() => setPeriodDropdownOpen(!periodDropdownOpen)}
-            >
-              <Calendar className="w-4 h-4 mr-2 text-[var(--color-text-secondary)]" />
-              <span className="capitalize">{period}</span>
-              <ChevronDown className="w-4 h-4 ml-2 text-[var(--color-text-secondary)]" />
-            </button>
-            
-            {periodDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-40 bg-[var(--color-card)] rounded-lg shadow-lg py-1 z-10">
-                {['week', 'month', 'quarter', 'year'].map(option => (
-                  <button
-                    key={option}
-                    className={`block w-full text-left px-4 py-2 hover:bg-[var(--color-primary-15)] ${
-                      period === option ? 'text-[var(--color-primary)]' : 'text-[var(--color-text)]'
-                    }`}
-                    onClick={() => {
-                      setPeriod(option);
-                      setPeriodDropdownOpen(false);
-                    }}
-                  >
-                    <span className="capitalize">{option}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      
-      {/* Main chart section */}
-      <div className="bg-[var(--color-card)] rounded-lg p-4 mb-6 analytics-chart-container">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
-          <h2 className="text-lg font-medium text-[var(--color-text)] mb-2 md:mb-0">Domain Progress Trends</h2>
-          
-          <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-8">
+      {/* Domain Selection and Time Period */}
+      <div className="flex justify-between items-center">
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          <button
+            onClick={() => setSelectedDomain(ALL_DOMAINS)}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              selectedDomain === ALL_DOMAINS
+                ? 'bg-[var(--color-primary-15)] text-[var(--color-primary)]'
+                : 'hover:bg-gray-100'
+            }`}
+          >
+            All Domains
+          </button>
+          {Object.keys(DOMAIN_CONFIG).map((domain) => (
             <button
-              className={`px-3 py-1 text-xs rounded-full ${
-                selectedDomain === 'all' ? 'bg-[var(--color-primary-15)] text-[var(--color-primary)]' : 'bg-[var(--color-background)] text-[var(--color-text-secondary)]'
+              key={domain}
+              onClick={() => setSelectedDomain(domain as DomainKey)}
+              className={`px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${
+                selectedDomain === domain
+                  ? 'bg-[var(--color-primary-15)] text-[var(--color-primary)]'
+                  : 'hover:bg-gray-100'
               }`}
-              onClick={() => setSelectedDomain('all')}
+              style={{ 
+                color: selectedDomain === domain ? getDomainColor(domain as DomainKey) : undefined 
+              }}
             >
-              All Domains
+              {getDomainLabel(domain as DomainKey)}
             </button>
-            
-            {Object.entries(DOMAIN_CONFIG).map(([key, config]) => {
-              const Icon = config.icon;
-              return (
-                <button
-                  key={key}
-                  className={`flex items-center px-3 py-1 text-xs rounded-full ${
-                    selectedDomain === key
-                      ? 'bg-[var(--color-primary-15)]'
-                      : 'bg-[var(--color-background)] hover:bg-[var(--color-primary-15)]'
-                  }`}
-                  style={{ 
-                    backgroundColor: selectedDomain === key ? config.color : undefined,
-                    opacity: selectedDomain !== 'all' && selectedDomain !== key ? 0.5 : 1,
-                    color: selectedDomain === key ? 'white' : 'var(--color-text)'
-                  }}
-                  onClick={() => setSelectedDomain(key)}
-                >
-                  <Icon className="w-3 h-3 mr-1" />
-                  <span>{config.label}</span>
-                </button>
-              );
-            })}
+          ))}
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setChartType('line')}
+              className={`p-2 rounded ${
+                chartType === 'line'
+                  ? 'bg-white shadow-sm'
+                  : 'hover:bg-gray-200'
+              }`}
+            >
+              <LineChartIcon className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setChartType('bar')}
+              className={`p-2 rounded ${
+                chartType === 'bar'
+                  ? 'bg-white shadow-sm'
+                  : 'hover:bg-gray-200'
+              }`}
+            >
+              <BarChart2 className="w-4 h-4" />
+            </button>
+          </div>
+          <select className="px-4 py-2 rounded-lg border">
+            <option value="month">Month</option>
+            <option value="quarter">Quarter</option>
+            <option value="year">Year</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Charts Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Progress Chart */}
+        <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+          <h3 className="text-lg font-semibold mb-6">Domain Progress Trends</h3>
+          <div className="h-[400px]">
+            {renderChart()}
           </div>
         </div>
-        
-        <div className="h-[300px]">
-          {isChartLoading ? (
-            <div className="h-full flex items-center justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
-            </div>
-          ) : (
+
+        {/* Domain Balance Pie Chart */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+          <h3 className="text-lg font-semibold mb-6">Current Domain Balance</h3>
+          <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              {chartType === 'line' && (
-                <LineChart
-                  data={rawData}
-                  margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis 
-                    dataKey="date" 
-                    tick={{ fill: 'var(--color-text-secondary)' }} 
-                    tickFormatter={formatDate}
-                    stroke="var(--color-border)"
-                  />
-                  <YAxis 
-                    domain={[0, 10]} 
-                    tick={{ fill: 'var(--color-text-secondary)' }} 
-                    stroke="var(--color-border)"
-                  />
-                  <Tooltip 
-                    formatter={(value) => [value.toFixed(1), '']}
-                    labelFormatter={formatDate}
-                    contentStyle={{ 
-                      backgroundColor: 'var(--color-card)', 
-                      border: '1px solid var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                  <Legend />
-                  {Object.entries(DOMAIN_CONFIG).map(([key, config]) => (
-                    (selectedDomain === 'all' || selectedDomain === key) && (
-                      <Line
-                        key={key}
-                        type="monotone"
-                        dataKey={key}
-                        name={config.label}
-                        stroke={config.color}
-                        activeDot={{ r: 8, fill: config.color, strokeWidth: 0 }}
-                        strokeWidth={2}
-                        dot={{ r: 3, fill: config.color, strokeWidth: 0 }}
-                        isAnimationActive={showChartAnimation}
-                      />
-                    )
-                  ))}
-                </LineChart>
-              )}
-              
-              {chartType === 'bar' && (
-                <BarChart
-                  data={weeklyAverages}
-                  margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="week" tick={{ fill: 'var(--color-text-secondary)' }} stroke="var(--color-border)" />
-                  <YAxis domain={[0, 10]} tick={{ fill: 'var(--color-text-secondary)' }} stroke="var(--color-border)" />
-                  <Tooltip 
-                    formatter={(value) => [value.toFixed(1), '']}
-                    contentStyle={{ 
-                      backgroundColor: 'var(--color-card)', 
-                      border: '1px solid var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                  <Legend />
-                  {Object.entries(DOMAIN_CONFIG).map(([key, config]) => (
-                    (selectedDomain === 'all' || selectedDomain === key) && (
-                      <Bar
-                        key={key}
-                        dataKey={key}
-                        name={config.label}
-                        fill={config.color}
-                        isAnimationActive={showChartAnimation}
-                      />
-                    )
-                  ))}
-                </BarChart>
-              )}
-              
-              {chartType === 'radar' && (
-                <RadarChart 
-                  outerRadius={90} 
-                  width={500} 
-                  height={300}
-                  data={
-                    rawData.length > 0 
-                      ? [
-                          Object.entries(DOMAIN_CONFIG).reduce((acc, [key, config]) => {
-                            acc[key] = rawData[rawData.length - 1][key] || 0;
-                            acc.domain = config.label;
-                            return acc;
-                          }, {})
-                        ]
-                      : []
-                  }
-                >
-                  <PolarGrid stroke="var(--color-border)" />
-                  <PolarAngleAxis dataKey="domain" tick={{ fill: 'var(--color-text-secondary)' }} />
-                  {Object.entries(DOMAIN_CONFIG).map(([key, config]) => (
-                    (selectedDomain === 'all' || selectedDomain === key) && (
-                      <Radar
-                        key={key}
-                        name={config.label}
-                        dataKey={key}
-                        stroke={config.color}
-                        fill={config.color}
-                        fillOpacity={0.6}
-                        isAnimationActive={showChartAnimation}
-                      />
-                    )
-                  ))}
-                  <Tooltip 
-                    formatter={(value) => [value.toFixed(1), '']}
-                    contentStyle={{ 
-                      backgroundColor: 'var(--color-card)', 
-                      border: '1px solid var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </RadarChart>
-              )}
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
-      
-      {/* Domain trends quick view */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
-        {Object.entries(DOMAIN_CONFIG).map(([domain, config]) => {
-          const Icon = config.icon;
-          const trend = domainTrends[domain] || {};
-          const insight = domainInsights[domain] || {};
-          
-          return (
-            <div 
-              key={domain}
-              className={`bg-[var(--color-card)] rounded-lg p-4 border border-transparent
-                        ${domain === analysisResults.topPerformingDomain 
-                          ? 'border-green-300 shadow-md' : ''}
-                        ${domain === analysisResults.needsAttentionDomain
-                          ? 'border-amber-300 shadow-md' : ''}`}
-            >
-              <div className="flex items-center mb-2">
-                <Icon className="w-4 h-4 mr-1" style={{ color: config.color }} />
-                <h3 className="text-sm font-medium" style={{ color: config.color }}>
-                  {config.label}
-                </h3>
-              </div>
-              
-              <div className="space-y-1 text-xs text-[var(--color-text-secondary)]">
-                <div className="flex justify-between">
-                  <span>Current</span>
-                  <span className="font-medium text-[var(--color-text)]">
-                    {trend.current?.toFixed(1) || 'N/A'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Change</span>
-                  <span className={`font-medium flex items-center ${trend.improving ? 'text-green-400' : 'text-red-400'}`}>
-                    {trend.percentChange ? `${trend.percentChange > 0 ? '+' : ''}${trend.percentChange.toFixed(1)}%` : 'N/A'}
-                    {trend.improving ? 
-                      <ArrowUpRight className="w-3 h-3 ml-1" /> : 
-                      <ArrowDownRight className="w-3 h-3 ml-1" />
-                    }
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Peak</span>
-                  <span className="font-medium text-[var(--color-text)]">
-                    {insight.peak?.toFixed(1) || 'N/A'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      
-      {/* Additional visualizations */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Domain Balance */}
-        <div className="bg-[var(--color-card)] rounded-lg p-4">
-          <h3 className="text-md font-medium text-[var(--color-text)] mb-4">Current Domain Balance</h3>
-          <div className="h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <RechartsPieChart>
+              <PieChart>
                 <Pie
-                  data={domainBalance}
+                  data={Object.entries(DOMAIN_CONFIG).map(([domain, config]) => {
+                    const latestEntry = entries[entries.length - 1] || {};
+                    const value = Number(latestEntry[domain as DomainKey]) || 0;
+                    const total = Object.entries(DOMAIN_CONFIG).reduce((sum, [d]) => {
+                      const domainValue = Number(latestEntry[d as DomainKey]) || 0;
+                      return sum + domainValue;
+                    }, 0);
+                    return {
+                      name: config.label,
+                      value: value,
+                      percentage: total > 0 ? (value / total) * 100 : 0,
+                      color: config.color
+                    };
+                  })}
                   cx="50%"
                   cy="50%"
-                  labelLine={false}
-                  outerRadius={80}
-                  fill="#8884d8"
+                  innerRadius={60}
+                  outerRadius={100}
+                  paddingAngle={5}
                   dataKey="value"
-                  label={({ name, value }) => `${name}: ${value.toFixed(1)}`}
-                  isAnimationActive={showChartAnimation}
                 >
-                  {domainBalance.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  {Object.entries(DOMAIN_CONFIG).map(([domain, config]) => (
+                    <Cell key={domain} fill={config.color} />
                   ))}
                 </Pie>
-                <Tooltip 
-                  formatter={(value) => [value.toFixed(1), '']}
-                  contentStyle={{ 
-                    backgroundColor: 'var(--color-card)', 
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text)'
+                <Tooltip
+                  content={({ payload }) => {
+                    if (!payload?.length) return null;
+                    const data = payload[0].payload;
+                    return (
+                      <div className="bg-white dark:bg-gray-800 p-2 rounded shadow-lg border border-gray-200 dark:border-gray-700">
+                        <p className="font-medium" style={{ color: data.color }}>{data.name}</p>
+                        <p className="text-gray-600 dark:text-gray-300">
+                          Score: {data.value.toFixed(1)}
+                        </p>
+                        <p className="text-gray-600 dark:text-gray-300">
+                          {data.percentage.toFixed(1)}%
+                        </p>
+                      </div>
+                    );
                   }}
                 />
-              </RechartsPieChart>
+                <Legend
+                  verticalAlign="bottom"
+                  align="center"
+                  layout="horizontal"
+                  formatter={(value, entry: any) => (
+                    <span style={{ color: entry.color }}>{value}</span>
+                  )}
+                />
+              </PieChart>
             </ResponsiveContainer>
           </div>
         </div>
-        
-        {/* Weekly Comparison */}
-        <div className="bg-[var(--color-card)] rounded-lg p-4">
-          <h3 className="text-md font-medium text-[var(--color-text)] mb-4">Weekly Progress</h3>
-          <div className="h-[250px]">
+
+        {/* Weekly Progress Area Chart */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+          <h3 className="text-lg font-semibold mb-6">Weekly Progress</h3>
+          <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={weeklyAverages}
-                margin={{ top: 10, right: 0, left: 0, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <XAxis dataKey="week" tick={{ fill: 'var(--color-text-secondary)' }} stroke="var(--color-border)" />
-                <YAxis domain={[0, 10]} tick={{ fill: 'var(--color-text-secondary)' }} stroke="var(--color-border)" />
-                <Tooltip 
-                  formatter={(value) => [value.toFixed(1), '']}
-                  contentStyle={{ 
-                    backgroundColor: 'var(--color-card)', 
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                />
+              <AreaChart data={areaChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="week" />
+                <YAxis domain={[0, 10]} />
+                <Tooltip />
                 <Legend />
-                {Object.entries(DOMAIN_CONFIG).map(([key, config]) => (
+                {Object.keys(DOMAIN_CONFIG).map((domain) => (
                   <Area
-                    key={key}
+                    key={domain}
                     type="monotone"
-                    dataKey={key}
-                    name={config.label}
-                    stroke={config.color}
-                    fill={config.color}
-                    fillOpacity={0.2}
-                    isAnimationActive={showChartAnimation}
+                    dataKey={domain}
+                    stackId="1"
+                    stroke={getDomainColor(domain as DomainKey)}
+                    fill={getDomainColor(domain as DomainKey)}
+                    fillOpacity={0.3}
+                    name={getDomainLabel(domain as DomainKey)}
                   />
                 ))}
               </AreaChart>
@@ -717,90 +426,352 @@ export function Analytics() {
           </div>
         </div>
       </div>
-      
-      {/* Pattern Analysis Section */}
-      <div className="bg-[var(--color-card)] rounded-lg p-4 mb-8 analytics-panel">
-        <h3 className="text-lg font-medium text-[var(--color-text)] mb-4">Pattern Analysis</h3>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Object.entries(analysisResults.variabilityInsights).map(([domain, insight]) => {
-            const config = DOMAIN_CONFIG[domain];
-            const Icon = config?.icon || Activity;
-            const statusColor = 
-              insight.level === 'high' ? 'bg-red-100 text-red-900 dark:bg-red-900 dark:text-red-300' :
-              insight.level === 'moderate' ? 'bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-300' :
-              'bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-300';
-            
-            return (
-              <div key={domain} className="bg-[var(--color-background)] rounded-lg p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center">
-                    <div className="rounded-md p-1" style={{ backgroundColor: config?.iconBgColor }}>
-                      <Icon className="w-4 h-4" style={{ color: config?.color }} />
+
+      {/* Domain Relationships */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h3 className="text-lg font-semibold mb-6">Domain Relationships</h3>
+        {analysisResults.correlations?.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {analysisResults.correlations.map((correlation, index) => {
+              const sourceConfig = DOMAIN_CONFIG[correlation.source];
+              const targetConfig = DOMAIN_CONFIG[correlation.target];
+              
+              if (!sourceConfig || !targetConfig) return null;
+
+              return (
+                <div 
+                  key={`${correlation.source}-${correlation.target}-${index}`} 
+                  className="p-4 rounded-lg bg-gradient-to-br from-gray-900/5 to-gray-900/20 dark:from-gray-800 dark:to-gray-700 border border-gray-100/20 dark:border-gray-600/20 backdrop-blur-sm"
+                >
+                  <div className="flex items-center gap-4">
+                    <div 
+                      className="rounded-full p-2 relative" 
+                      style={{ 
+                        backgroundColor: sourceConfig.color + '20',
+                        boxShadow: `0 0 20px ${sourceConfig.color}40`
+                      }}
+                    >
+                      {sourceConfig.icon && <sourceConfig.icon className="w-5 h-5" style={{ color: sourceConfig.color }} />}
+                      <div className="absolute inset-0 rounded-full" style={{ 
+                        background: `radial-gradient(circle at center, ${sourceConfig.color}10 0%, transparent 70%)` 
+                      }} />
                     </div>
-                    <h4 className="ml-2 text-sm font-medium text-[var(--color-text)]">{config?.label}</h4>
+                    <div className="flex flex-col items-center">
+                      {correlation.positive ? (
+                        <TrendingUp className="w-5 h-5 text-green-500" />
+                      ) : (
+                        <TrendingDown className="w-5 h-5 text-red-500" />
+                      )}
+                      <span className="text-xs text-gray-500">
+                        {Math.abs(correlation.correlation).toFixed(2)}
+                      </span>
+                    </div>
+                    <div 
+                      className="rounded-full p-2 relative" 
+                      style={{ 
+                        backgroundColor: targetConfig.color + '20',
+                        boxShadow: `0 0 20px ${targetConfig.color}40`
+                      }}
+                    >
+                      {targetConfig.icon && <targetConfig.icon className="w-5 h-5" style={{ color: targetConfig.color }} />}
+                      <div className="absolute inset-0 rounded-full" style={{ 
+                        background: `radial-gradient(circle at center, ${targetConfig.color}10 0%, transparent 70%)` 
+                      }} />
+                    </div>
                   </div>
-                  
-                  <div className={`text-xs px-2 py-1 rounded-full capitalize ${statusColor}`}>
-                    {insight.level} variability
-                  </div>
+                  <p className="mt-3 text-sm text-gray-700 dark:text-gray-300">
+                    <span className="font-medium">{sourceConfig.label}</span> and{' '}
+                    <span className="font-medium">{targetConfig.label}</span> show a{' '}
+                    <span className={correlation.positive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                      {correlation.positive ? 'positive' : 'negative'}
+                    </span>{' '}
+                    relationship
+                    {correlation.strength >= 0.7 ? ' (strong)' : ' (moderate)'}
+                  </p>
                 </div>
-                
-                <p className="text-xs text-[var(--color-text-secondary)] mt-2">{insight.insight}</p>
-              </div>
-            );
-          })}
-        </div>
-        
-        {/* Correlation Insights */}
-        {correlationData.length > 0 && (
-          <div className="mt-6">
-            <h4 className="text-md font-medium text-[var(--color-text)] mb-3">Domain Relationships</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {correlationData.slice(0, 4).map((corr, i) => {
-                const sourceConfig = DOMAIN_CONFIG[corr.source];
-                const targetConfig = DOMAIN_CONFIG[corr.target];
-                const SourceIcon = sourceConfig?.icon || Activity;
-                const TargetIcon = targetConfig?.icon || Brain;
-                
-                const correlationColor = corr.positive ? 
-                  'bg-green-100 text-green-900 dark:bg-green-900 dark:text-green-300' : 
-                  'bg-red-100 text-red-900 dark:bg-red-900 dark:text-red-300';
-                
-                return (
-                  <div key={i} className="bg-[var(--color-background)] rounded-lg p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center">
-                        <SourceIcon className="w-4 h-4" style={{ color: sourceConfig?.color }} />
-                        <span className="mx-2 text-[var(--color-text)]">⟺</span>
-                        <TargetIcon className="w-4 h-4" style={{ color: targetConfig?.color }} />
-                      </div>
-                      
-                      <div className={`text-xs px-2 py-1 rounded-full ${correlationColor}`}>
-                        {corr.positive ? 'Positive' : 'Negative'} correlation
-                      </div>
-                    </div>
-                    
-                    <p className="text-xs text-[var(--color-text-secondary)]">
-                      {corr.positive
-                        ? `As your ${sourceConfig?.label} improves, your ${targetConfig?.label} tends to improve as well.`
-                        : `When your ${sourceConfig?.label} increases, your ${targetConfig?.label} tends to decrease.`}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            No significant relationships found between domains yet.
           </div>
         )}
       </div>
-      
-      {/* Personal Insights Section */}
-      <div className="mt-8 analytics-panel">
-        <AnalyticsInsights 
-          domainData={rawData.length > 0 ? rawData[rawData.length - 1] : null}
-          recentChange={recentChange}
-        />
+
+      {/* Pattern Analysis */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h3 className="text-lg font-semibold mb-6">Pattern Analysis</h3>
+        {Object.keys(analysisResults.variabilityInsights || {}).length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Object.entries(analysisResults.variabilityInsights).map(([domain, insight]) => {
+              const domainConfig = DOMAIN_CONFIG[domain as DomainKey];
+              const Icon = domainConfig?.icon;
+              
+              if (!domainConfig || !insight) return null;
+
+              return (
+                <div key={domain} className="p-4 rounded-lg bg-gradient-to-br from-gray-900/5 to-gray-900/20 dark:from-gray-800 dark:to-gray-700 border border-gray-100/20 dark:border-gray-600/20 backdrop-blur-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center relative"
+                        style={{ 
+                          backgroundColor: getDomainColor(domain as DomainKey) + '20',
+                          boxShadow: `0 0 20px ${getDomainColor(domain as DomainKey)}40`
+                        }}
+                      >
+                        {Icon && (
+                          <Icon 
+                            className="w-5 h-5 relative z-10"
+                            style={{ color: getDomainColor(domain as DomainKey) }}
+                          />
+                        )}
+                        <div className="absolute inset-0 rounded-full" style={{ 
+                          background: `radial-gradient(circle at center, ${getDomainColor(domain as DomainKey)}10 0%, transparent 70%)` 
+                        }} />
+                      </div>
+                      <div>
+                        <span className="font-medium block">{domainConfig.label}</span>
+                        <span className="text-sm text-gray-500">
+                          Score: {insight.score.toFixed(1)}
+                        </span>
+                      </div>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full text-sm ${
+                      insight.level === 'low' ? 'bg-green-100/80 text-green-700 dark:bg-green-900/20 dark:text-green-400' :
+                      insight.level === 'moderate' ? 'bg-yellow-100/80 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400' :
+                      'bg-red-100/80 text-red-700 dark:bg-red-900/20 dark:text-red-400'
+                    }`}>
+                      {insight.level} variability
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    {insight.insight || `Your ${domainConfig.label.toLowerCase()} shows ${insight.level} variability.`}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            Not enough data to analyze patterns yet.
+          </div>
+        )}
+      </div>
+
+      {/* Personal Insights */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h3 className="text-lg font-semibold mb-6">Personal Insights</h3>
+        <div className="space-y-6">
+          {/* Overall Insight */}
+          <div className="p-4 rounded-lg bg-gradient-to-br from-gray-900/5 to-gray-900/20 dark:from-gray-800 dark:to-gray-700 border border-gray-100/20 dark:border-gray-600/20 backdrop-blur-sm">
+            <p className="text-gray-700 dark:text-gray-300">
+              {analysisResults.overallInsight || 'Start tracking your domains to receive personalized insights about your progress and patterns.'}
+            </p>
+          </div>
+
+          {/* Top Performing & Needs Attention */}
+          {(analysisResults.topPerformingDomain || analysisResults.needsAttentionDomain) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {analysisResults.topPerformingDomain && (
+                <div className="p-4 rounded-lg bg-green-50/80 dark:bg-green-900/20 border border-green-100/50 dark:border-green-900/50 backdrop-blur-sm">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center relative"
+                      style={{ 
+                        backgroundColor: getDomainColor(analysisResults.topPerformingDomain) + '20',
+                        boxShadow: `0 0 20px ${getDomainColor(analysisResults.topPerformingDomain)}40`
+                      }}
+                    >
+                      {(() => {
+                        const Icon = DOMAIN_CONFIG[analysisResults.topPerformingDomain].icon;
+                        return Icon ? (
+                          <Icon 
+                            className="w-5 h-5 relative z-10"
+                            style={{ color: getDomainColor(analysisResults.topPerformingDomain) }}
+                          />
+                        ) : null;
+                      })()}
+                      <div className="absolute inset-0 rounded-full" style={{ 
+                        background: `radial-gradient(circle at center, ${getDomainColor(analysisResults.topPerformingDomain)}10 0%, transparent 70%)` 
+                      }} />
+                    </div>
+                    <div>
+                      <h4 className="font-medium text-green-800 dark:text-green-400">Top Performing Area</h4>
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        {getDomainLabel(analysisResults.topPerformingDomain)}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-green-700 dark:text-green-300">
+                    Keep up the great work in this area! Your consistent high performance shows dedication and commitment.
+                  </p>
+                </div>
+              )}
+
+              {analysisResults.needsAttentionDomain && (
+                <div className="p-4 rounded-lg bg-yellow-50/80 dark:bg-yellow-900/20 border border-yellow-100/50 dark:border-yellow-900/50 backdrop-blur-sm">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center relative"
+                      style={{ 
+                        backgroundColor: getDomainColor(analysisResults.needsAttentionDomain) + '20',
+                        boxShadow: `0 0 20px ${getDomainColor(analysisResults.needsAttentionDomain)}40`
+                      }}
+                    >
+                      {(() => {
+                        const Icon = DOMAIN_CONFIG[analysisResults.needsAttentionDomain].icon;
+                        return Icon ? (
+                          <Icon 
+                            className="w-5 h-5 relative z-10"
+                            style={{ color: getDomainColor(analysisResults.needsAttentionDomain) }}
+                          />
+                        ) : null;
+                      })()}
+                      <div className="absolute inset-0 rounded-full" style={{ 
+                        background: `radial-gradient(circle at center, ${getDomainColor(analysisResults.needsAttentionDomain)}10 0%, transparent 70%)` 
+                      }} />
+                    </div>
+                    <div>
+                      <h4 className="font-medium text-yellow-800 dark:text-yellow-400">Area Needing Attention</h4>
+                      <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                        {getDomainLabel(analysisResults.needsAttentionDomain)}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                    Consider focusing more attention on this area. Small improvements here can lead to better overall balance.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Personalized Suggestions */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+        <h3 className="text-lg font-semibold mb-6">Personalized Suggestions</h3>
+        {analysisResults.suggestions?.length > 0 ? (
+          <div className="space-y-4">
+            {analysisResults.suggestions.map((suggestion, index) => (
+              <div 
+                key={index}
+                className={`p-4 rounded-lg border backdrop-blur-sm ${
+                  index === 0 
+                    ? 'bg-blue-50/80 dark:bg-blue-900/20 border-blue-100/50 dark:border-blue-900/50' 
+                    : 'bg-gradient-to-br from-gray-900/5 to-gray-900/20 dark:from-gray-800 dark:to-gray-700 border-gray-100/20 dark:border-gray-600/20'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`mt-1 ${
+                    index === 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'
+                  }`}>
+                    <ThumbsUp className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className={`text-sm ${
+                      index === 0 
+                        ? 'text-blue-700 dark:text-blue-300' 
+                        : 'text-gray-700 dark:text-gray-300'
+                    }`}>
+                      {suggestion}
+                    </p>
+                    {index === 0 && (
+                      <span className="inline-block mt-2 text-xs font-medium text-blue-600 dark:text-blue-400">
+                        New Suggestion
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            Continue tracking your progress to receive personalized suggestions.
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function generateSuggestions(
+  insights: Record<DomainKey, DomainInsight>,
+  variabilityInsights: Record<DomainKey, { level: 'low' | 'moderate' | 'high'; score: number; insight: string }>
+): string[] {
+  console.log('Generating suggestions with:', { insights, variabilityInsights });
+  
+  if (!insights || Object.keys(insights).length === 0) {
+    console.log('No insights available');
+    return [];
+  }
+
+  const suggestions: string[] = [];
+  const domains = Object.keys(DOMAIN_CONFIG) as DomainKey[];
+
+  domains.forEach(domain => {
+    const insight = insights[domain];
+    const variability = variabilityInsights[domain];
+    const domainConfig = DOMAIN_CONFIG[domain];
+
+    if (!insight?.trend || !domainConfig) {
+      console.log(`Missing data for domain ${domain}:`, { insight, domainConfig });
+      return;
+    }
+
+    // Add suggestion based on trend
+    if (insight.trend.change < -1) {
+      suggestions.push(
+        `Your ${domainConfig.label.toLowerCase()} score has decreased recently. Consider setting specific goals to improve in this area.`
+      );
+    }
+
+    // Add suggestion based on variability
+    if (variability?.level === 'high') {
+      suggestions.push(
+        `Your ${domainConfig.label.toLowerCase()} shows high variability. Try to establish a more consistent routine.`
+      );
+    }
+
+    // Add suggestion based on low scores
+    if (insight.trend.current < 4) {
+      suggestions.push(
+        `Your ${domainConfig.label.toLowerCase()} score is below average. Focus on small, achievable improvements in this area.`
+      );
+    }
+  });
+
+  // Limit to top 5 most relevant suggestions
+  return suggestions.slice(0, 5);
+}
+
+function generateOverallInsight(
+  insights: Record<DomainKey, DomainInsight>,
+  variabilityInsights: Record<DomainKey, { level: 'low' | 'moderate' | 'high'; score: number; insight: string }>
+): string {
+  if (!insights || Object.keys(insights).length === 0) {
+    return "Start tracking your progress to receive personalized insights about your journey.";
+  }
+
+  const domains = Object.keys(DOMAIN_CONFIG) as DomainKey[];
+  const validScores = domains
+    .map(domain => insights[domain]?.trend?.current)
+    .filter((score): score is number => typeof score === 'number' && !isNaN(score));
+
+  if (validScores.length === 0) {
+    return "Add some entries to see insights about your progress across different areas.";
+  }
+
+  const overallAverage = validScores.reduce((sum, score) => sum + score, 0) / validScores.length;
+
+  if (overallAverage >= 8) {
+    return "You're maintaining excellent progress across all areas. Your consistent high scores show you've found effective strategies for balance and growth.";
+  } else if (overallAverage >= 6) {
+    return "You're showing good progress overall. While there's room for improvement in some areas, you're maintaining a solid foundation for growth.";
+  } else {
+    return "There's potential for growth across several areas. Focus on setting small, achievable goals and building consistent habits.";
+  }
 } 

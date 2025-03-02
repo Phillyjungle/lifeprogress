@@ -3,6 +3,11 @@ import { useLocation, Link } from 'react-router-dom';
 import { Home, BarChart2, Target, Settings, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 import { useUser } from '../context/UserContext';
+import {
+  LayoutDashboard,
+  Crown,
+  Zap
+} from 'lucide-react';
 
 // Add CSS for the background pattern and styling
 const sidebarStyles = `
@@ -29,16 +34,35 @@ const sidebarStyles = `
 }
 
 .app-title {
-  background: linear-gradient(90deg, #e35d46, #f77f00);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  position: relative;
+  display: inline-block;
+  color: #2ecc71; /* Green text color */
+  font-weight: bold;
+  text-shadow: 0 0 10px rgba(46, 204, 113, 0.3); /* Subtle green glow */
+  transition: all 0.3s ease;
+}
+
+.app-title:hover {
+  text-shadow: 0 0 15px rgba(46, 204, 113, 0.5); /* Enhanced glow on hover */
+}
+
+.header-container {
+  background-color: rgba(46, 204, 113, 0.1); /* Very light green background */
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  transition: all 0.3s ease;
+}
+
+.header-container:hover {
+  background-color: rgba(46, 204, 113, 0.15); /* Slightly darker on hover */
 }
 `;
 
 const Sidebar = () => {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
-  const { profile } = useUser();
+  const { profile, isPremium } = useUser();
   
   // Check if the current path matches the given path
   const isActive = (path: string) => {
@@ -47,25 +71,36 @@ const Sidebar = () => {
 
   // Navigation items with icons
   const navItems = [
-    { 
-      title: 'Dashboard', 
-      path: '/', 
-      icon: Home 
+    {
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+      path: '/'
     },
-    { 
-      title: 'Analytics', 
-      path: '/analytics', 
-      icon: BarChart2 
+    {
+      label: 'Analytics',
+      icon: BarChart2,
+      path: '/analytics'
     },
-    { 
-      title: 'Goal Tracking', 
-      path: '/goals', 
-      icon: Target 
+    {
+      label: 'Goals',
+      icon: Target,
+      path: '/goals'
     },
-    { 
-      title: 'Settings', 
-      path: '/settings', 
-      icon: Settings 
+    {
+      label: 'Premium Features',
+      icon: Crown,
+      path: '/premium-features',
+      highlight: !isPremium()
+    },
+    {
+      label: 'Subscription',
+      icon: Zap,
+      path: '/subscription'
+    },
+    {
+      label: 'Settings',
+      icon: Settings,
+      path: '/settings'
     }
   ];
 
@@ -94,25 +129,27 @@ const Sidebar = () => {
         )}
       </button>
     
-      {/* Sidebar for both mobile and desktop */}
+      {/* Sidebar Container */}
       <div 
         className={`
-          fixed md:static top-0 left-0 z-40 h-screen 
+          fixed md:static top-0 left-0 z-40
+          h-screen w-64 flex flex-col
           bg-white shadow-md md:shadow-none
           transition-transform duration-300 ease-in-out
           ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-          w-64 flex-shrink-0 overflow-y-auto
         `}
       >
-        {/* Brand/Logo */}
+        {/* Header Section */}
         <div className="p-6">
-          <h1 className="text-xl font-bold text-gray-800">Life Tracker</h1>
+          <div className="header-container">
+            <h1 className="text-xl font-bold text-gray-800 app-title">Life Tracker</h1>
+          </div>
           <p className="text-sm text-gray-500 mt-1">Track your progress</p>
         </div>
         
-        {/* Navigation */}
-        <nav className="mt-6">
-          <ul className="space-y-2 px-3">
+        {/* Navigation Section - with flex-grow to push profile to bottom */}
+        <nav className="flex-grow overflow-y-auto px-3">
+          <ul className="space-y-2">
             {navItems.map((item) => {
               const active = isActive(item.path);
               const Icon = item.icon;
@@ -134,7 +171,12 @@ const Sidebar = () => {
                     <Icon 
                       className={`w-5 h-5 ${active ? 'text-white' : 'text-gray-500'}`} 
                     />
-                    <span className="ml-3">{item.title}</span>
+                    <span className="ml-3">{item.label}</span>
+                    {item.highlight && (
+                      <span className="ml-auto text-xs font-medium text-[var(--color-primary)]">
+                        Upgrade
+                      </span>
+                    )}
                   </Link>
                 </li>
               );
@@ -142,23 +184,25 @@ const Sidebar = () => {
           </ul>
         </nav>
         
-        {/* Bottom section - can contain profile, logout, etc */}
-        <div className="absolute bottom-0 left-0 right-0 p-6">
-          <div className="py-4 border-t border-gray-200">
-            <div className="flex items-center">
-              <div className="w-8 h-8 rounded-full bg-[var(--color-primary-15)] flex items-center justify-center text-[var(--color-primary)] font-medium">
-                JC
-              </div>
-              <div className="ml-3">
-                <p className="text-sm font-medium text-gray-700">{profile.name}</p>
-                <p className="text-xs text-gray-500">{profile.email}</p>
-              </div>
+        {/* Profile Section - now properly spaced from navigation */}
+        <div className="p-4 border-t border-gray-200 mt-auto">
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 rounded-full bg-[var(--color-primary-15)] flex items-center justify-center text-[var(--color-primary)] font-medium">
+              {profile?.name?.charAt(0) || 'G'}
+            </div>
+            <div className="flex-grow min-w-0">
+              <p className="text-sm font-medium text-gray-700 truncate">
+                {profile?.name || 'Guest'}
+              </p>
+              <p className="text-xs text-gray-500 truncate">
+                {profile?.email || ''}
+              </p>
             </div>
           </div>
         </div>
       </div>
       
-      {/* Overlay for mobile - closes sidebar when clicking outside */}
+      {/* Mobile Overlay */}
       {isOpen && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-30 z-30 md:hidden"
