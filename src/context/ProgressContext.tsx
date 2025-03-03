@@ -157,19 +157,41 @@ export const ProgressProvider: React.FC<{children: React.ReactNode}> = ({ childr
     let needsAttentionDomain: { domain: DomainKey; insight: string } | null = null;
     let maxScore = -1;
     let minScore = 11;
+    let allLowScores = true;
+    let allHighScores = true;
 
     const domains = Object.keys(DOMAIN_CONFIG) as DomainKey[];
     const latestEntry = filteredEntries[filteredEntries.length - 1];
 
+    // Calculate average score across all domains
+    const avgScore = domains.reduce((sum, domain) => {
+      const score = latestEntry[domain] as number || 0;
+      return sum + score;
+    }, 0) / domains.length;
+
     domains.forEach(domain => {
       const currentScore = latestEntry[domain] as number || 0;
+      
+      // Check if we have any high scores (above 7)
+      if (currentScore < 7) {
+        allHighScores = false;
+      }
+      
+      // Check if we have any scores that aren't low (above 3)
+      if (currentScore > 3) {
+        allLowScores = false;
+      }
+      
       if (currentScore > maxScore) {
         maxScore = currentScore;
         topPerformingDomain = {
           domain,
-          insight: `Consistently high performance in ${DOMAIN_CONFIG[domain].label.toLowerCase()}`
+          insight: currentScore > 6 
+            ? `Consistently high performance in ${DOMAIN_CONFIG[domain].label.toLowerCase()}`
+            : `Relatively better performance in ${DOMAIN_CONFIG[domain].label.toLowerCase()}`
         };
       }
+      
       if (currentScore < minScore && currentScore > 0) {
         minScore = currentScore;
         needsAttentionDomain = {
@@ -178,6 +200,18 @@ export const ProgressProvider: React.FC<{children: React.ReactNode}> = ({ childr
         };
       }
     });
+    
+    // If all scores are low, adjust the insights
+    if (allLowScores) {
+      // All domains need attention, so pick the lowest one
+      topPerformingDomain = null;
+    }
+    
+    // If all scores are high, adjust the insights
+    if (allHighScores) {
+      // All domains are performing well, so no domain needs special attention
+      needsAttentionDomain = null;
+    }
 
     // Initialize variabilityInsights with default values for all domains
     const variabilityInsights: Record<DomainKey, { level: 'low' | 'moderate' | 'high'; score: number; insight: string }> = 

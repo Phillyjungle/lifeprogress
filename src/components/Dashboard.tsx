@@ -2,6 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { HelpCircle, Plus, Activity, Brain, Users, Briefcase, Star, LogOut } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { RatingGuideModal } from './RatingGuideModal';
+import { useProgress } from '../context/ProgressContext';
+import { DomainData, DomainKey } from '../types/analytics';
+import { DOMAIN_CONFIG } from '../config/domains';
+import { format } from 'date-fns';
+import { v4 as uuidv4 } from 'uuid';
 
 interface ProgressEntry {
   health: number;
@@ -13,7 +18,7 @@ interface ProgressEntry {
 }
 
 // Domain configuration with colors and icons
-const DOMAIN_CONFIG = {
+const DOMAIN_CONFIG_LOCAL = {
   health: {
     label: 'Physical Health',
     color: '#4361ee',
@@ -47,19 +52,25 @@ const DOMAIN_CONFIG = {
 };
 
 // Format date for display
-const formatDate = (dateStr) => {
+const formatDate = (dateStr: string): string => {
   const date = new Date(dateStr);
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+interface TooltipProps {
+  active?: boolean;
+  payload?: Array<any>;
+  label?: string;
+}
+
 // Custom tooltip component for the chart
-const CustomTooltip = ({ active, payload, label }) => {
+const CustomTooltip = ({ active, payload, label }: TooltipProps) => {
   if (active && payload && payload.length) {
     return (
       <div className="bg-white bg-opacity-90 p-4 rounded-xl shadow-sm border border-gray-100">
-        <p className="text-gray-700 font-medium mb-2">{formatDate(label)}</p>
+        <p className="text-gray-700 font-medium mb-2">{formatDate(label || '')}</p>
         <div className="space-y-1.5">
-          {payload.map((entry) => (
+          {payload.map((entry: any) => (
             <div key={entry.name} className="flex items-center gap-2">
               <div 
                 className="w-3 h-3 rounded-full" 
@@ -79,8 +90,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 export function Dashboard() {
   const [isRatingGuideOpen, setIsRatingGuideOpen] = useState(false);
-  const [entries, setEntries] = useState<ProgressEntry[]>([]);
-  const [chartData, setChartData] = useState([]);
+  const { entries, addEntry } = useProgress();
+  const [chartData, setChartData] = useState<any[]>([]);
   const [currentRatings, setCurrentRatings] = useState({
     health: 8.5,
     mental: 6.0,
@@ -107,7 +118,7 @@ export function Dashboard() {
   });
 
   // Animation states
-  const [activeCard, setActiveCard] = useState(null);
+  const [activeCard, setActiveCard] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showSavedMessage, setShowSavedMessage] = useState(false);
   const [pulseDomains, setPulseDomains] = useState({
@@ -119,65 +130,38 @@ export function Dashboard() {
   });
 
   // Reference to chart container for animations
-  const chartRef = useRef(null);
+  const chartRef = useRef<HTMLDivElement | null>(null);
   
   // Load entries and current ratings
   useEffect(() => {
-    const loadData = () => {
-      // Simulate loading from API or localStorage
-      const savedEntries = localStorage.getItem('entries');
+    if (entries.length > 0) {
+      // Generate chart data from entries
+      const lastTenEntries = entries.slice(-10);
+      setChartData(lastTenEntries as any[]);
       
-      if (savedEntries) {
-        const parsedEntries = JSON.parse(savedEntries);
-        setEntries(parsedEntries);
-        
-        // Generate chart data from entries
-        if (parsedEntries.length > 0) {
-          const lastTenEntries = parsedEntries.slice(-10);
-          setChartData(lastTenEntries);
-          
-          // Set current ratings from the latest entry
-          const latestEntry = parsedEntries[parsedEntries.length - 1];
-          setCurrentRatings({
-            health: latestEntry.health,
-            mental: latestEntry.mental,
-            social: latestEntry.social,
-            career: latestEntry.career,
-            growth: latestEntry.growth
-          });
-          
-          // Set previous ratings from the second latest entry if available
-          if (parsedEntries.length > 1) {
-            const previousEntry = parsedEntries[parsedEntries.length - 2];
-            setPreviousRatings({
-              health: previousEntry.health,
-              mental: previousEntry.mental,
-              social: previousEntry.social,
-              career: previousEntry.career,
-              growth: previousEntry.growth
-            });
-          }
-        }
-      } else {
-        // Create example data if no entries exist
-        const exampleData = generateExampleData();
-        setChartData(exampleData);
-        
-        // Simulate value changes for demo purposes
-        simulateValueChanges();
+      // Set current ratings from the latest entry
+      const latestEntry = entries[entries.length - 1];
+      setCurrentRatings({
+        health: latestEntry.health || 5,
+        mental: latestEntry.mental || 5,
+        social: latestEntry.social || 5,
+        career: latestEntry.career || 5,
+        growth: latestEntry.growth || 5
+      });
+      
+      // Set previous ratings from the second latest entry if available
+      if (entries.length > 1) {
+        const previousEntry = entries[entries.length - 2];
+        setPreviousRatings({
+          health: previousEntry.health || 5,
+          mental: previousEntry.mental || 5,
+          social: previousEntry.social || 5,
+          career: previousEntry.career || 5,
+          growth: previousEntry.growth || 5
+        });
       }
-    };
-    
-    loadData();
-    
-    // Set up interval for simulating real-time changes
-    const interval = setInterval(() => {
-      simulateValueChanges();
-      simulateDomainPulse();
-    }, 5000);
-    
-    return () => clearInterval(interval);
-  }, []);
+    }
+  }, [entries]);
   
   // Generate sample data for the chart
   const generateExampleData = () => {
@@ -238,67 +222,62 @@ export function Dashboard() {
     // Show saving state
     setIsSaving(true);
     
-    // Simulate API call delay
-    setTimeout(() => {
-      // Create new entry with today's date
-      const newEntry = {
-        ...todayRatings,
-        date: new Date().toISOString().split('T')[0]
-      };
-      
-      // Update entries
-      const updatedEntries = [...entries, newEntry];
-      setEntries(updatedEntries);
-      
-      // Save to localStorage
-      localStorage.setItem('entries', JSON.stringify(updatedEntries));
-      
-      // Update chart data
-      const updatedChartData = [...chartData, newEntry].slice(-10);
-      setChartData(updatedChartData);
-      
-      // Update current and previous ratings
-      setPreviousRatings({...currentRatings});
-      setCurrentRatings({...todayRatings});
-      
-      // Animate chart
-      if (chartRef.current) {
-        chartRef.current.classList.add('chart-pulse');
-        setTimeout(() => {
+    // Get current date in user's local timezone
+    const now = new Date();
+    // Format as YYYY-MM-DD with timezone consideration
+    const localDate = now.getFullYear() + '-' + 
+                     String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                     String(now.getDate()).padStart(2, '0');
+    
+    // Create new entry with today's date
+    const newEntry: DomainData = {
+      ...todayRatings,
+      id: uuidv4(),
+      date: localDate
+    };
+    
+    // Add entry to context (which will update localStorage)
+    addEntry(newEntry);
+    
+    // Animate chart
+    if (chartRef.current) {
+      chartRef.current.classList.add('chart-pulse');
+      setTimeout(() => {
+        if (chartRef.current) {
           chartRef.current.classList.remove('chart-pulse');
-        }, 1000);
-      }
-      
-      // Animate all domains
+        }
+      }, 1000);
+    }
+    
+    // Animate all domains
+    setPulseDomains({
+      health: true,
+      mental: true,
+      social: true,
+      career: true,
+      growth: true
+    });
+    
+    setTimeout(() => {
       setPulseDomains({
-        health: true,
-        mental: true,
-        social: true,
-        career: true,
-        growth: true
+        health: false,
+        mental: false,
+        social: false,
+        career: false,
+        growth: false
       });
-      
-      setTimeout(() => {
-        setPulseDomains({
-          health: false,
-          mental: false,
-          social: false,
-          career: false,
-          growth: false
-        });
-      }, 2000);
-      
-      // Show success message
-      setIsSaving(false);
-      setShowSavedMessage(true);
-      setTimeout(() => {
-        setShowSavedMessage(false);
-      }, 3000);
-    }, 1500);
+    }, 2000);
+    
+    // Show success message
+    setIsSaving(false);
+    setShowSavedMessage(true);
+    setTimeout(() => {
+      setShowSavedMessage(false);
+    }, 3000);
   };
   
   // Handle rating changes
-  const handleRatingChange = (domain, value) => {
+  const handleRatingChange = (domain: keyof typeof todayRatings, value: number) => {
     setTodayRatings(prev => ({
       ...prev,
       [domain]: value
@@ -319,7 +298,7 @@ export function Dashboard() {
   };
   
   // Calculate change indicators (positive or negative changes)
-  const calculateChange = (domain) => {
+  const calculateChange = (domain: keyof typeof currentRatings) => {
     const current = currentRatings[domain];
     const previous = previousRatings[domain];
     const diff = Math.round((current - previous) * 10) / 10;

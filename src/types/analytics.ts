@@ -20,6 +20,13 @@ export interface DomainInsight {
   domain: DomainKey;
   insight: string;
   score?: number;
+  trend?: {
+    current: number;
+    previous: number;
+    change: number;
+  };
+  average?: number;
+  variability?: number;
 }
 
 export interface VariabilityInsight {

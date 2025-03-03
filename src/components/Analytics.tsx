@@ -237,15 +237,31 @@ export const Analytics: React.FC<Props> = ({ className }) => {
     if (!entries.length) return;
 
     const filteredEntries = filterEntriesByPeriod(entries, selectedTimeRange);
-    const formattedData = filteredEntries.map(entry => ({
-      name: format(new Date(entry.date), 'MMM d'),
-      ...Object.keys(DOMAIN_CONFIG).reduce((acc, domain) => ({
-        ...acc,
-        [domain]: Number(entry[domain as DomainKey]).toFixed(1)
-      }), {})
-    }));
+    
+    // Force re-render by creating a new date object for each entry
+    const formattedData = filteredEntries.map((entry: DomainData) => {
+      // Parse the date string to ensure proper date handling
+      const entryDate = new Date(entry.date);
+      
+      return {
+        // Format date for display
+        name: format(entryDate, 'MMM d'),
+        // Include the raw date for sorting
+        rawDate: entry.date,
+        // Include domain values
+        ...Object.keys(DOMAIN_CONFIG).reduce((acc, domain) => ({
+          ...acc,
+          [domain]: Number(entry[domain as DomainKey]).toFixed(1)
+        }), {})
+      };
+    });
 
-    setChartData(formattedData);
+    // Sort by date to ensure chronological order
+    const sortedData = formattedData.sort((a, b) => 
+      new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime()
+    );
+
+    setChartData(sortedData);
   }, [entries, selectedTimeRange]);
 
   // Early return if no entries
