@@ -196,14 +196,15 @@ export const calculateDomainCorrelations = (entries: DomainData[]): Array<{
 
 export function generateSampleData(): DomainData[] {
   const sampleData: DomainData[] = [];
-  const now = new Date();
+  const today = new Date();
   
-  // Generate data for the last 30 days
-  for (let i = 29; i >= 0; i--) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
+  // Generate 30 days of sample data
+  for (let i = 30; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(today.getDate() - i);
     
     sampleData.push({
+      id: `sample-${i}`,
       date: date.toISOString().split('T')[0],
       timestamp: date.toISOString(),
       health: 5 + Math.random() * 3, // Random value between 5-8

@@ -1,32 +1,54 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, BarChart, Bar } from 'recharts';
 import { DOMAIN_CONFIG } from '../config/domains';
-import { DomainData, DomainCorrelation, AnalysisResults, DomainInsight, DomainChange } from '../types/analytics';
-import { getDomainColor, getDomainLabel, calculateDomainVariability, formatDomainData, getDomainValue, DomainKey, DomainSelection, ALL_DOMAINS } from '../utils/domainUtils';
+import { DomainData, DomainCorrelation, AnalysisResults, DomainInsight, DomainChange, DomainKey } from '../types/analytics';
+import { getDomainColor, getDomainLabel, calculateDomainVariability, formatDomainData, getDomainValue, DomainSelection, ALL_DOMAINS } from '../utils/domainUtils';
 import { calculateWeeklyAverages, calculateDomainCorrelations, filterEntriesByPeriod } from '../utils/analyticsUtils';
 import { Loader2, TrendingUp, TrendingDown, BarChart2, LineChart as LineChartIcon, ThumbsUp } from 'lucide-react';
 import { AnalyticsInsights } from './AnalyticsInsights';
+import { useProgress } from '../context/ProgressContext';
+import { format } from 'date-fns';
 
 interface Props {
-  entries: DomainData[];
+  className?: string;
 }
 
-type ChartType = 'line' | 'bar';
+type ChartType = 'line' | 'area' | 'bar';
 
-export const Analytics: React.FC<Props> = ({ entries }) => {
-  const [loading, setLoading] = useState(false);
-  const [selectedDomain, setSelectedDomain] = useState<DomainSelection>(ALL_DOMAINS);
+interface DomainTrend {
+  current: number;
+  previous: number;
+  change: number;
+}
+
+interface ExtendedDomainInsight {
+  domain: DomainKey;
+  insight: string;
+  trend: DomainTrend;
+  average: number;
+  variability: number;
+}
+
+interface VariabilityInsight {
+  level: 'low' | 'moderate' | 'high';
+  score: number;
+  insight: string;
+}
+
+export const Analytics: React.FC<Props> = ({ className }) => {
+  const {
+    entries,
+    analysisResults,
+    setAnalysisResults,
+    selectedTimeRange,
+    setSelectedTimeRange
+  } = useProgress();
+
+  const [selectedDomain, setSelectedDomain] = useState<DomainKey | 'all'>('all');
   const [chartType, setChartType] = useState<ChartType>('line');
-  const [domainInsights, setDomainInsights] = useState<Record<DomainKey, DomainInsight>>({} as Record<DomainKey, DomainInsight>);
+  const [domainInsights, setDomainInsights] = useState<Record<DomainKey, ExtendedDomainInsight>>({} as Record<DomainKey, ExtendedDomainInsight>);
   const [recentChange, setRecentChange] = useState<DomainChange | null>(null);
-  const [analysisResults, setAnalysisResults] = useState<AnalysisResults>({
-    variabilityInsights: {} as Record<DomainKey, { level: 'low' | 'moderate' | 'high'; score: number; insight: string }>,
-    correlations: [],
-    suggestions: [],
-    overallInsight: '',
-    topPerformingDomain: null,
-    needsAttentionDomain: null
-  });
+  const [chartData, setChartData] = useState<any[]>([]);
 
   const weeklyData = useMemo(() => calculateWeeklyAverages(entries), [entries]);
 
@@ -62,11 +84,13 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
   };
 
   useEffect(() => {
+    if (!entries.length) return;
+
     const newCorrelations = calculateDomainCorrelations(entries);
     const domains = Object.keys(DOMAIN_CONFIG) as DomainKey[];
     
     // Initialize variabilityInsights with default values for all domains
-    const variabilityInsights: Record<DomainKey, { level: 'low' | 'moderate' | 'high'; score: number; insight: string }> = {
+    const variabilityInsights: Record<DomainKey, VariabilityInsight> = {
       health: { level: 'low', score: 0, insight: '' },
       mental: { level: 'low', score: 0, insight: '' },
       social: { level: 'low', score: 0, insight: '' },
@@ -95,12 +119,9 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
       };
     });
 
-    // Generate suggestions based on insights and variability
-    const suggestions = generateSuggestions(domainInsights, variabilityInsights);
-
     // Find top performing and needs attention domains
-    let topPerformingDomain: DomainKey | null = null;
-    let needsAttentionDomain: DomainKey | null = null;
+    let topPerformingDomain: { domain: DomainKey; insight: string } | null = null;
+    let needsAttentionDomain: { domain: DomainKey; insight: string } | null = null;
     let maxScore = -1;
     let minScore = 11;
 
@@ -108,35 +129,41 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
       const currentScore = entries[entries.length - 1]?.[domain] as number || 0;
       if (currentScore > maxScore) {
         maxScore = currentScore;
-        topPerformingDomain = domain;
+        topPerformingDomain = {
+          domain,
+          insight: `Consistently high performance in ${getDomainLabel(domain).toLowerCase()}`
+        };
       }
       if (currentScore < minScore && currentScore > 0) {
         minScore = currentScore;
-        needsAttentionDomain = domain;
+        needsAttentionDomain = {
+          domain,
+          insight: `Focus needed in ${getDomainLabel(domain).toLowerCase()}`
+        };
       }
     });
 
-    // Generate overall insight
-    const overallInsight = generateOverallInsight(domainInsights, variabilityInsights);
-
-    setAnalysisResults(prev => ({
-      ...prev,
-      variabilityInsights,
-      correlations: newCorrelations.map(corr => ({
-        source: corr.source as DomainKey,
-        target: corr.target as DomainKey,
-        correlation: corr.correlation,
-        strength: corr.strength >= 0.7 ? 1 : corr.strength >= 0.3 ? 0.5 : 0.2,
-        positive: corr.positive
-      })),
-      suggestions,
-      overallInsight,
-      topPerformingDomain,
-      needsAttentionDomain
+    // Convert correlations to DomainCorrelation format
+    const formattedCorrelations: DomainCorrelation[] = newCorrelations.map(corr => ({
+      domain1: corr.source as DomainKey,
+      domain2: corr.target as DomainKey,
+      strength: corr.strength,
+      positive: corr.positive,
+      insight: `${DOMAIN_CONFIG[corr.source as DomainKey].label} and ${DOMAIN_CONFIG[corr.target as DomainKey].label} show a ${corr.positive ? 'positive' : 'negative'} correlation with ${corr.strength.toFixed(2)} strength.`
     }));
 
+    const newAnalysisResults: AnalysisResults = {
+      correlations: formattedCorrelations,
+      variabilityInsights,
+      overallInsight: 'Analysis complete. Review your domain relationships and patterns above.',
+      topPerformingDomain,
+      needsAttentionDomain
+    };
+
+    setAnalysisResults(newAnalysisResults);
+
     // Calculate domain insights
-    const insights: Record<DomainKey, DomainInsight> = {} as Record<DomainKey, DomainInsight>;
+    const insights: Record<DomainKey, ExtendedDomainInsight> = {} as Record<DomainKey, ExtendedDomainInsight>;
     
     domains.forEach(domain => {
       const currentEntry = entries[entries.length - 1];
@@ -152,15 +179,19 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
       const average = domainValues.length
         ? domainValues.reduce((sum, val) => sum + val, 0) / domainValues.length
         : 0;
+
+      const variability = calculateDomainVariability(entries, domain).score;
       
       insights[domain] = {
+        domain,
+        insight: `${getDomainLabel(domain)} shows ${variability > 0.7 ? 'high' : variability > 0.3 ? 'moderate' : 'low'} variability`,
+        average,
+        variability,
         trend: {
           current,
           previous,
           change: current - previous
-        },
-        average,
-        variability: calculateDomainVariability(entries, domain).score
+        }
       };
     });
 
@@ -199,29 +230,38 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
         });
       }
     }
+  }, [entries, setAnalysisResults]);
 
-    console.log('Analysis Results:', {
-      correlations: newCorrelations,
-      variabilityInsights,
-      suggestions,
-      overallInsight,
-      topPerformingDomain,
-      needsAttentionDomain
-    });
-  }, [entries]);
+  // Update chart data when entries or time range changes
+  useEffect(() => {
+    if (!entries.length) return;
 
-  if (loading) {
+    const filteredEntries = filterEntriesByPeriod(entries, selectedTimeRange);
+    const formattedData = filteredEntries.map(entry => ({
+      name: format(new Date(entry.date), 'MMM d'),
+      ...Object.keys(DOMAIN_CONFIG).reduce((acc, domain) => ({
+        ...acc,
+        [domain]: Number(entry[domain as DomainKey]).toFixed(1)
+      }), {})
+    }));
+
+    setChartData(formattedData);
+  }, [entries, selectedTimeRange]);
+
+  // Early return if no entries
+  if (!entries || entries.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
+      <div className="text-center py-12">
+        <p className="text-[var(--color-text-secondary)]">No data available yet. Start tracking your progress to see insights.</p>
       </div>
     );
   }
 
-  if (!entries.length) {
+  // Early return if no analysis results
+  if (!analysisResults) {
     return (
       <div className="text-center py-12">
-        <p className="text-[var(--color-text-secondary)]">No data available yet. Start tracking your progress to see insights.</p>
+        <p className="text-[var(--color-text-secondary)]">Loading analysis results...</p>
       </div>
     );
   }
@@ -231,23 +271,28 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
     
     return (
       <ResponsiveContainer width="100%" height="100%">
-        <ChartComponent data={areaChartData}>
+        <ChartComponent data={chartData}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="week" />
-          <YAxis domain={[0, 10]} />
-          <Tooltip />
+          <XAxis dataKey="name" tick={{ fill: 'var(--color-text)' }} />
+          <YAxis domain={[0, 10]} tick={{ fill: 'var(--color-text)' }} />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: 'var(--color-background)',
+              border: '1px solid var(--color-border)'
+            }}
+          />
           <Legend />
           {visibleDomains.map((domain) => (
             chartType === 'line' ? (
               <Line
                 key={domain}
-                type="monotone"
+                type="linear"
                 dataKey={domain}
                 stroke={getDomainColor(domain)}
                 name={getDomainLabel(domain)}
                 strokeWidth={2}
-                dot={{ r: 4 }}
-                activeDot={{ r: 6 }}
+                dot={false}
+                activeDot={{ r: 4 }}
               />
             ) : (
               <Bar
@@ -262,70 +307,90 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
       </ResponsiveContainer>
     );
   };
-
+  
   return (
-    <div className="space-y-8">
-      {/* Domain Selection and Time Period */}
+    <div className={`space-y-8 ${className}`}>
+      {/* Time Period Selection */}
       <div className="flex justify-between items-center">
-        <div className="flex gap-2 overflow-x-auto pb-2">
-          <button
-            onClick={() => setSelectedDomain(ALL_DOMAINS)}
-            className={`px-4 py-2 rounded-lg transition-colors ${
-              selectedDomain === ALL_DOMAINS
-                ? 'bg-[var(--color-primary-15)] text-[var(--color-primary)]'
-                : 'hover:bg-gray-100'
-            }`}
-          >
-            All Domains
-          </button>
-          {Object.keys(DOMAIN_CONFIG).map((domain) => (
+        <div className="flex gap-2">
+          {['week', 'month', 'quarter', 'year'].map((period) => (
             <button
-              key={domain}
-              onClick={() => setSelectedDomain(domain as DomainKey)}
-              className={`px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${
-                selectedDomain === domain
-                  ? 'bg-[var(--color-primary-15)] text-[var(--color-primary)]'
-                  : 'hover:bg-gray-100'
-              }`}
-              style={{ 
-                color: selectedDomain === domain ? getDomainColor(domain as DomainKey) : undefined 
-              }}
+              key={period}
+              onClick={() => setSelectedTimeRange(period as 'week' | 'month' | 'quarter' | 'year')}
+              className={`
+                px-4 py-2 rounded-lg transition-colors
+                ${selectedTimeRange === period
+                  ? 'bg-[var(--color-primary)] text-white'
+                  : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                }
+              `}
             >
-              {getDomainLabel(domain as DomainKey)}
+              {period.charAt(0).toUpperCase() + period.slice(1)}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
-            <button
-              onClick={() => setChartType('line')}
-              className={`p-2 rounded ${
-                chartType === 'line'
-                  ? 'bg-white shadow-sm'
-                  : 'hover:bg-gray-200'
-              }`}
-            >
-              <LineChartIcon className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setChartType('bar')}
-              className={`p-2 rounded ${
-                chartType === 'bar'
-                  ? 'bg-white shadow-sm'
-                  : 'hover:bg-gray-200'
-              }`}
-            >
-              <BarChart2 className="w-4 h-4" />
-            </button>
-          </div>
-          <select className="px-4 py-2 rounded-lg border">
-            <option value="month">Month</option>
-            <option value="quarter">Quarter</option>
-            <option value="year">Year</option>
-          </select>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setChartType('line')}
+            className={`
+              p-2 rounded-lg transition-colors
+              ${chartType === 'line'
+                ? 'bg-[var(--color-primary)] text-white'
+                : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+              }
+            `}
+          >
+            <LineChartIcon className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setChartType('bar')}
+            className={`
+              p-2 rounded-lg transition-colors
+              ${chartType === 'bar'
+                ? 'bg-[var(--color-primary)] text-white'
+                : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+              }
+            `}
+          >
+            <BarChart2 className="w-5 h-5" />
+          </button>
         </div>
       </div>
 
+      {/* Domain Selection */}
+      <div className="flex gap-2 overflow-x-auto pb-2">
+        <button
+          onClick={() => setSelectedDomain('all')}
+          className={`
+            px-4 py-2 rounded-lg transition-colors
+            ${selectedDomain === 'all'
+              ? 'bg-[var(--color-primary-15)] text-[var(--color-primary)]'
+              : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+            }
+          `}
+        >
+          All Domains
+        </button>
+        {Object.entries(DOMAIN_CONFIG).map(([domain, config]) => (
+          <button
+            key={domain}
+            onClick={() => setSelectedDomain(domain as DomainKey)}
+            className={`
+              px-4 py-2 rounded-lg transition-colors whitespace-nowrap
+              ${selectedDomain === domain
+                ? 'bg-[var(--color-primary-15)]'
+                : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+              }
+            `}
+            style={{
+              color: selectedDomain === domain ? config.color : undefined
+            }}
+          >
+            {config.label}
+          </button>
+        ))}
+      </div>
+      
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Progress Chart */}
@@ -335,11 +400,11 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
             {renderChart()}
           </div>
         </div>
-
+        
         {/* Domain Balance Pie Chart */}
         <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
           <h3 className="text-lg font-semibold mb-6">Current Domain Balance</h3>
-          <div className="h-[300px]">
+        <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -368,7 +433,7 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
                     <Cell key={domain} fill={config.color} />
                   ))}
                 </Pie>
-                <Tooltip
+                <Tooltip 
                   content={({ payload }) => {
                     if (!payload?.length) return null;
                     const data = payload[0].payload;
@@ -397,7 +462,7 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
             </ResponsiveContainer>
           </div>
         </div>
-
+        
         {/* Weekly Progress Area Chart */}
         <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
           <h3 className="text-lg font-semibold mb-6">Weekly Progress</h3>
@@ -426,21 +491,21 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
           </div>
         </div>
       </div>
-
+      
       {/* Domain Relationships */}
       <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
         <h3 className="text-lg font-semibold mb-6">Domain Relationships</h3>
-        {analysisResults.correlations?.length > 0 ? (
+        {analysisResults.correlations.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {analysisResults.correlations.map((correlation, index) => {
-              const sourceConfig = DOMAIN_CONFIG[correlation.source];
-              const targetConfig = DOMAIN_CONFIG[correlation.target];
+              const sourceConfig = DOMAIN_CONFIG[correlation.domain1];
+              const targetConfig = DOMAIN_CONFIG[correlation.domain2];
               
               if (!sourceConfig || !targetConfig) return null;
-
-              return (
+            
+            return (
                 <div 
-                  key={`${correlation.source}-${correlation.target}-${index}`} 
+                  key={`${correlation.domain1}-${correlation.domain2}-${index}`} 
                   className="p-4 rounded-lg bg-gradient-to-br from-gray-900/5 to-gray-900/20 dark:from-gray-800 dark:to-gray-700 border border-gray-100/20 dark:border-gray-600/20 backdrop-blur-sm"
                 >
                   <div className="flex items-center gap-4">
@@ -463,7 +528,7 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
                         <TrendingDown className="w-5 h-5 text-red-500" />
                       )}
                       <span className="text-xs text-gray-500">
-                        {Math.abs(correlation.correlation).toFixed(2)}
+                        {Math.abs(correlation.strength).toFixed(2)}
                       </span>
                     </div>
                     <div 
@@ -477,7 +542,7 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
                       <div className="absolute inset-0 rounded-full" style={{ 
                         background: `radial-gradient(circle at center, ${targetConfig.color}10 0%, transparent 70%)` 
                       }} />
-                    </div>
+                  </div>
                   </div>
                   <p className="mt-3 text-sm text-gray-700 dark:text-gray-300">
                     <span className="font-medium">{sourceConfig.label}</span> and{' '}
@@ -488,29 +553,29 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
                     relationship
                     {correlation.strength >= 0.7 ? ' (strong)' : ' (moderate)'}
                   </p>
-                </div>
-              );
-            })}
+              </div>
+            );
+          })}
           </div>
         ) : (
           <div className="text-center py-8 text-gray-500">
             No significant relationships found between domains yet.
           </div>
         )}
-      </div>
-
+        </div>
+        
       {/* Pattern Analysis */}
       <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
         <h3 className="text-lg font-semibold mb-6">Pattern Analysis</h3>
-        {Object.keys(analysisResults.variabilityInsights || {}).length > 0 ? (
+        {Object.keys(analysisResults.variabilityInsights).length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {Object.entries(analysisResults.variabilityInsights).map(([domain, insight]) => {
               const domainConfig = DOMAIN_CONFIG[domain as DomainKey];
               const Icon = domainConfig?.icon;
               
               if (!domainConfig || !insight) return null;
-
-              return (
+                
+                return (
                 <div key={domain} className="p-4 rounded-lg bg-gradient-to-br from-gray-900/5 to-gray-900/20 dark:from-gray-800 dark:to-gray-700 border border-gray-100/20 dark:border-gray-600/20 backdrop-blur-sm">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
@@ -549,17 +614,17 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
                   <p className="text-sm text-gray-600 dark:text-gray-300">
                     {insight.insight || `Your ${domainConfig.label.toLowerCase()} shows ${insight.level} variability.`}
                   </p>
-                </div>
-              );
-            })}
-          </div>
+                  </div>
+                );
+              })}
+            </div>
         ) : (
           <div className="text-center py-8 text-gray-500">
             Not enough data to analyze patterns yet.
           </div>
         )}
       </div>
-
+      
       {/* Personal Insights */}
       <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
         <h3 className="text-lg font-semibold mb-6">Personal Insights</h3>
@@ -580,32 +645,32 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
                     <div
                       className="w-10 h-10 rounded-full flex items-center justify-center relative"
                       style={{ 
-                        backgroundColor: getDomainColor(analysisResults.topPerformingDomain) + '20',
-                        boxShadow: `0 0 20px ${getDomainColor(analysisResults.topPerformingDomain)}40`
+                        backgroundColor: getDomainColor(analysisResults.topPerformingDomain.domain) + '20',
+                        boxShadow: `0 0 20px ${getDomainColor(analysisResults.topPerformingDomain.domain)}40`
                       }}
                     >
                       {(() => {
-                        const Icon = DOMAIN_CONFIG[analysisResults.topPerformingDomain].icon;
+                        const Icon = DOMAIN_CONFIG[analysisResults.topPerformingDomain.domain].icon;
                         return Icon ? (
                           <Icon 
                             className="w-5 h-5 relative z-10"
-                            style={{ color: getDomainColor(analysisResults.topPerformingDomain) }}
+                            style={{ color: getDomainColor(analysisResults.topPerformingDomain.domain) }}
                           />
                         ) : null;
                       })()}
                       <div className="absolute inset-0 rounded-full" style={{ 
-                        background: `radial-gradient(circle at center, ${getDomainColor(analysisResults.topPerformingDomain)}10 0%, transparent 70%)` 
+                        background: `radial-gradient(circle at center, ${getDomainColor(analysisResults.topPerformingDomain.domain)}10 0%, transparent 70%)` 
                       }} />
                     </div>
                     <div>
                       <h4 className="font-medium text-green-800 dark:text-green-400">Top Performing Area</h4>
                       <p className="text-sm text-green-700 dark:text-green-300">
-                        {getDomainLabel(analysisResults.topPerformingDomain)}
+                        {getDomainLabel(analysisResults.topPerformingDomain.domain)}
                       </p>
                     </div>
                   </div>
                   <p className="text-sm text-green-700 dark:text-green-300">
-                    Keep up the great work in this area! Your consistent high performance shows dedication and commitment.
+                    {analysisResults.topPerformingDomain.insight}
                   </p>
                 </div>
               )}
@@ -616,32 +681,32 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
                     <div
                       className="w-10 h-10 rounded-full flex items-center justify-center relative"
                       style={{ 
-                        backgroundColor: getDomainColor(analysisResults.needsAttentionDomain) + '20',
-                        boxShadow: `0 0 20px ${getDomainColor(analysisResults.needsAttentionDomain)}40`
+                        backgroundColor: getDomainColor(analysisResults.needsAttentionDomain.domain) + '20',
+                        boxShadow: `0 0 20px ${getDomainColor(analysisResults.needsAttentionDomain.domain)}40`
                       }}
                     >
                       {(() => {
-                        const Icon = DOMAIN_CONFIG[analysisResults.needsAttentionDomain].icon;
+                        const Icon = DOMAIN_CONFIG[analysisResults.needsAttentionDomain.domain].icon;
                         return Icon ? (
                           <Icon 
                             className="w-5 h-5 relative z-10"
-                            style={{ color: getDomainColor(analysisResults.needsAttentionDomain) }}
+                            style={{ color: getDomainColor(analysisResults.needsAttentionDomain.domain) }}
                           />
                         ) : null;
                       })()}
                       <div className="absolute inset-0 rounded-full" style={{ 
-                        background: `radial-gradient(circle at center, ${getDomainColor(analysisResults.needsAttentionDomain)}10 0%, transparent 70%)` 
+                        background: `radial-gradient(circle at center, ${getDomainColor(analysisResults.needsAttentionDomain.domain)}10 0%, transparent 70%)` 
                       }} />
                     </div>
                     <div>
                       <h4 className="font-medium text-yellow-800 dark:text-yellow-400">Area Needing Attention</h4>
                       <p className="text-sm text-yellow-700 dark:text-yellow-300">
-                        {getDomainLabel(analysisResults.needsAttentionDomain)}
+                        {getDomainLabel(analysisResults.needsAttentionDomain.domain)}
                       </p>
                     </div>
                   </div>
                   <p className="text-sm text-yellow-700 dark:text-yellow-300">
-                    Consider focusing more attention on this area. Small improvements here can lead to better overall balance.
+                    {analysisResults.needsAttentionDomain.insight}
                   </p>
                 </div>
               )}
@@ -649,129 +714,6 @@ export const Analytics: React.FC<Props> = ({ entries }) => {
           )}
         </div>
       </div>
-
-      {/* Personalized Suggestions */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
-        <h3 className="text-lg font-semibold mb-6">Personalized Suggestions</h3>
-        {analysisResults.suggestions?.length > 0 ? (
-          <div className="space-y-4">
-            {analysisResults.suggestions.map((suggestion, index) => (
-              <div 
-                key={index}
-                className={`p-4 rounded-lg border backdrop-blur-sm ${
-                  index === 0 
-                    ? 'bg-blue-50/80 dark:bg-blue-900/20 border-blue-100/50 dark:border-blue-900/50' 
-                    : 'bg-gradient-to-br from-gray-900/5 to-gray-900/20 dark:from-gray-800 dark:to-gray-700 border-gray-100/20 dark:border-gray-600/20'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className={`mt-1 ${
-                    index === 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'
-                  }`}>
-                    <ThumbsUp className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className={`text-sm ${
-                      index === 0 
-                        ? 'text-blue-700 dark:text-blue-300' 
-                        : 'text-gray-700 dark:text-gray-300'
-                    }`}>
-                      {suggestion}
-                    </p>
-                    {index === 0 && (
-                      <span className="inline-block mt-2 text-xs font-medium text-blue-600 dark:text-blue-400">
-                        New Suggestion
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-8 text-gray-500">
-            Continue tracking your progress to receive personalized suggestions.
-          </div>
-        )}
-      </div>
     </div>
   );
-}
-
-function generateSuggestions(
-  insights: Record<DomainKey, DomainInsight>,
-  variabilityInsights: Record<DomainKey, { level: 'low' | 'moderate' | 'high'; score: number; insight: string }>
-): string[] {
-  console.log('Generating suggestions with:', { insights, variabilityInsights });
-  
-  if (!insights || Object.keys(insights).length === 0) {
-    console.log('No insights available');
-    return [];
-  }
-
-  const suggestions: string[] = [];
-  const domains = Object.keys(DOMAIN_CONFIG) as DomainKey[];
-
-  domains.forEach(domain => {
-    const insight = insights[domain];
-    const variability = variabilityInsights[domain];
-    const domainConfig = DOMAIN_CONFIG[domain];
-
-    if (!insight?.trend || !domainConfig) {
-      console.log(`Missing data for domain ${domain}:`, { insight, domainConfig });
-      return;
-    }
-
-    // Add suggestion based on trend
-    if (insight.trend.change < -1) {
-      suggestions.push(
-        `Your ${domainConfig.label.toLowerCase()} score has decreased recently. Consider setting specific goals to improve in this area.`
-      );
-    }
-
-    // Add suggestion based on variability
-    if (variability?.level === 'high') {
-      suggestions.push(
-        `Your ${domainConfig.label.toLowerCase()} shows high variability. Try to establish a more consistent routine.`
-      );
-    }
-
-    // Add suggestion based on low scores
-    if (insight.trend.current < 4) {
-      suggestions.push(
-        `Your ${domainConfig.label.toLowerCase()} score is below average. Focus on small, achievable improvements in this area.`
-      );
-    }
-  });
-
-  // Limit to top 5 most relevant suggestions
-  return suggestions.slice(0, 5);
-}
-
-function generateOverallInsight(
-  insights: Record<DomainKey, DomainInsight>,
-  variabilityInsights: Record<DomainKey, { level: 'low' | 'moderate' | 'high'; score: number; insight: string }>
-): string {
-  if (!insights || Object.keys(insights).length === 0) {
-    return "Start tracking your progress to receive personalized insights about your journey.";
-  }
-
-  const domains = Object.keys(DOMAIN_CONFIG) as DomainKey[];
-  const validScores = domains
-    .map(domain => insights[domain]?.trend?.current)
-    .filter((score): score is number => typeof score === 'number' && !isNaN(score));
-
-  if (validScores.length === 0) {
-    return "Add some entries to see insights about your progress across different areas.";
-  }
-
-  const overallAverage = validScores.reduce((sum, score) => sum + score, 0) / validScores.length;
-
-  if (overallAverage >= 8) {
-    return "You're maintaining excellent progress across all areas. Your consistent high scores show you've found effective strategies for balance and growth.";
-  } else if (overallAverage >= 6) {
-    return "You're showing good progress overall. While there's room for improvement in some areas, you're maintaining a solid foundation for growth.";
-  } else {
-    return "There's potential for growth across several areas. Focus on setting small, achievable goals and building consistent habits.";
-  }
 } 

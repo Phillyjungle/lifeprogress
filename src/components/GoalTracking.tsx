@@ -4,10 +4,24 @@ import {
   Plus, Check, ChevronRight, Calendar, Target, 
   Edit, Trash2, X, Clock, Zap, ChevronDown
 } from 'lucide-react';
-import { ProgressEntry } from '../types';
+import { useProgress } from '../context/ProgressContext';
+import { DOMAIN_CONFIG } from '../types/analytics';
+
+type DomainFilter = keyof typeof DOMAIN_CONFIG | 'all' | 'completed' | 'inprogress';
+
+interface Goal {
+  id: string;
+  title: string;
+  description: string;
+  domain: keyof typeof DOMAIN_CONFIG;
+  deadline: string;
+  progress: number;
+  steps: string[];
+  isCompleted: boolean;
+}
 
 // Importing our domain configuration for consistent styling
-const DOMAIN_CONFIG = {
+const DOMAIN_CONFIG_OBJ = {
   health: {
     label: 'Physical Health',
     color: '#4361ee',
@@ -45,7 +59,7 @@ interface Goal {
   id: string;
   title: string;
   description: string;
-  domain: string;
+  domain: keyof typeof DOMAIN_CONFIG;
   deadline: string;
   progress: number;
   steps: GoalStep[];
@@ -61,15 +75,13 @@ interface GoalStep {
   isCompleted: boolean;
 }
 
-interface GoalTrackingProps {
-  entries: ProgressEntry[];
-}
-
-export function GoalTracking({ entries }: GoalTrackingProps) {
+export function GoalTracking() {
+  const { entries } = useProgress();
+  
   // State for goals
   const [goals, setGoals] = useState<Goal[]>([]);
   const [filteredGoals, setFilteredGoals] = useState<Goal[]>([]);
-  const [activeFilter, setActiveFilter] = useState('all');
+  const [selectedDomain, setSelectedDomain] = useState<DomainFilter>('all');
   const [isAddingGoal, setIsAddingGoal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedGoals, setExpandedGoals] = useState<Record<string, boolean>>({});
@@ -79,7 +91,7 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
   const [newGoal, setNewGoal] = useState<Partial<Goal>>({
     title: '',
     description: '',
-    domain: '',
+    domain: 'health',
     deadline: '',
     progress: 0,
     steps: [],
@@ -113,24 +125,24 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
   
   // Update filtered goals when active filter changes
   useEffect(() => {
-    if (activeFilter === 'all') {
+    if (selectedDomain === 'all') {
       setFilteredGoals(goals);
-    } else if (activeFilter === 'completed') {
+    } else if (selectedDomain === 'completed') {
       setFilteredGoals(goals.filter(goal => goal.isCompleted));
-    } else if (activeFilter === 'inprogress') {
+    } else if (selectedDomain === 'inprogress') {
       setFilteredGoals(goals.filter(goal => !goal.isCompleted));
     } else {
       // Filter by domain
-      setFilteredGoals(goals.filter(goal => goal.domain === activeFilter));
+      setFilteredGoals(goals.filter(goal => goal.domain === selectedDomain));
     }
-  }, [goals, activeFilter]);
+  }, [goals, selectedDomain]);
   
   // Update domain totals when goals change
   useEffect(() => {
     const totals: Record<string, { total: number, completed: number }> = {};
     
     // Initialize with zeros for all domains
-    Object.keys(DOMAIN_CONFIG).forEach(domain => {
+    Object.keys(DOMAIN_CONFIG_OBJ).forEach(domain => {
       totals[domain] = { total: 0, completed: 0 };
     });
     
@@ -248,7 +260,7 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
       id: Date.now().toString(),
       title: newGoal.title || '',
       description: newGoal.description || '',
-      domain: newGoal.domain || '',
+      domain: newGoal.domain || 'health',
       deadline: newGoal.deadline || '',
       progress: 0,
       steps: newGoal.steps || [],
@@ -266,7 +278,7 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
     setNewGoal({
       title: '',
       description: '',
-      domain: '',
+      domain: 'health',
       deadline: '',
       progress: 0,
       steps: [],
@@ -417,7 +429,7 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
       
       {/* Domain quick stats */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        {Object.entries(DOMAIN_CONFIG).map(([domain, config]) => {
+        {Object.entries(DOMAIN_CONFIG_OBJ).map(([domain, config]) => {
           const stats = domainTotals[domain] || { total: 0, completed: 0 };
           const Icon = config.icon;
           const percentage = stats.total ? Math.round((stats.completed / stats.total) * 100) : 0;
@@ -425,9 +437,9 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
           return (
             <button
               key={domain}
-              onClick={() => setActiveFilter(domain)}
+              onClick={() => setSelectedDomain(domain)}
               className={`flex items-start p-4 rounded-xl transition-all 
-                         ${activeFilter === domain ? 
+                         ${selectedDomain === domain ? 
                             `bg-[${config.color}] bg-opacity-10 border border-[${config.color}] border-opacity-20` : 
                             'bg-white bg-opacity-85 backdrop-blur-sm hover:bg-opacity-100 border border-gray-100'}`}
             >
@@ -444,7 +456,7 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
               <div className="flex-1">
                 <h3 
                   className="text-sm font-medium"
-                  style={{ color: activeFilter === domain ? config.color : '#4a4a4a' }}
+                  style={{ color: selectedDomain === domain ? config.color : '#4a4a4a' }}
                 >
                   {config.label}
                 </h3>
@@ -472,9 +484,9 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mt-6">
         <button
-          onClick={() => setActiveFilter('all')}
+          onClick={() => setSelectedDomain('all')}
           className={`px-3 py-1.5 text-sm rounded-lg transition-colors
-                     ${activeFilter === 'all' ? 
+                     ${selectedDomain === 'all' ? 
                         'bg-gray-800 text-white' : 
                         'bg-white hover:bg-gray-100 text-gray-700'}`}
         >
@@ -482,9 +494,9 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
         </button>
         
         <button
-          onClick={() => setActiveFilter('inprogress')}
+          onClick={() => setSelectedDomain('inprogress')}
           className={`px-3 py-1.5 text-sm rounded-lg transition-colors
-                     ${activeFilter === 'inprogress' ? 
+                     ${selectedDomain === 'inprogress' ? 
                         'bg-blue-500 text-white' : 
                         'bg-white hover:bg-gray-100 text-gray-700'}`}
         >
@@ -492,9 +504,9 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
         </button>
         
         <button
-          onClick={() => setActiveFilter('completed')}
+          onClick={() => setSelectedDomain('completed')}
           className={`px-3 py-1.5 text-sm rounded-lg transition-colors
-                     ${activeFilter === 'completed' ? 
+                     ${selectedDomain === 'completed' ? 
                         'bg-green-500 text-white' : 
                         'bg-white hover:bg-gray-100 text-gray-700'}`}
         >
@@ -553,7 +565,7 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
                 Domain <span className="text-red-500">*</span>
               </label>
               <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
-                {Object.entries(DOMAIN_CONFIG).map(([domain, config]) => {
+                {Object.entries(DOMAIN_CONFIG_OBJ).map(([domain, config]) => {
                   const Icon = config.icon;
                   const isSelected = newGoal.domain === domain;
                   
@@ -678,13 +690,13 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
             <Target className="w-10 h-10 text-gray-300 mx-auto mb-3" />
             <h3 className="text-lg font-medium text-gray-800 mb-1">No goals found</h3>
             <p className="text-gray-500 mb-4">
-              {activeFilter === 'all' 
+              {selectedDomain === 'all' 
                 ? "You haven't created any goals yet." 
-                : `You don't have any ${activeFilter === 'completed' ? 'completed' : activeFilter} goals.`}
+                : `You don't have any ${selectedDomain === 'completed' ? 'completed' : selectedDomain} goals.`}
             </p>
-            {activeFilter !== 'all' && (
+            {selectedDomain !== 'all' && (
               <button
-                onClick={() => setActiveFilter('all')}
+                onClick={() => setSelectedDomain('all')}
                 className="text-[var(--color-primary)] hover:text-[var(--color-primary-hover)] underline"
               >
                 View all goals
@@ -693,7 +705,7 @@ export function GoalTracking({ entries }: GoalTrackingProps) {
           </div>
         ) : (
           filteredGoals.map(goal => {
-            const domain = DOMAIN_CONFIG[goal.domain];
+            const domain = DOMAIN_CONFIG_OBJ[goal.domain];
             const Icon = domain?.icon || Target;
             const isExpanded = expandedGoals[goal.id];
             const daysRemaining = getDaysRemaining(goal.deadline);

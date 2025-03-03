@@ -19,6 +19,7 @@ import { UserProvider, useUser } from './context/UserContext';
 import { LandingPage } from './components/LandingPage';
 import { SubscriptionUpgrade } from './components/SubscriptionUpgrade';
 import { PremiumAnalytics } from './components/PremiumAnalytics';
+import { ProgressProvider } from './context/ProgressContext';
 
 interface User {
   id: string;
@@ -578,7 +579,7 @@ input[type="range"]::-moz-range-thumb:hover {
 }
 `;
 
-function MainAppLayout({ entries }: { entries: ProgressEntry[] }) {
+function MainAppLayout() {
   const { theme } = useUser();
   
   return (
@@ -587,8 +588,8 @@ function MainAppLayout({ entries }: { entries: ProgressEntry[] }) {
       <main className="flex-1 p-6 overflow-auto">
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/analytics" element={<Analytics entries={entries} />} />
-          <Route path="/goals" element={<GoalTracking entries={entries} />} />
+          <Route path="/analytics" element={<Analytics />} />
+          <Route path="/goals" element={<GoalTracking />} />
           <Route path="/settings" element={<SettingsComponent />} />
           <Route path="/subscription" element={<SubscriptionUpgrade />} />
           <Route path="/premium-features" element={<PremiumAnalytics />} />
@@ -602,16 +603,6 @@ function MainAppLayout({ entries }: { entries: ProgressEntry[] }) {
 
 function AppContent() {
   const { user } = useUser();
-  const [entries, setEntries] = useState<ProgressEntry[]>(() => {
-    const savedEntries = localStorage.getItem('progressEntries');
-    if (savedEntries) {
-      return JSON.parse(savedEntries);
-    }
-    // Generate sample data if no entries exist
-    const sampleData = generateSampleData();
-    localStorage.setItem('progressEntries', JSON.stringify(sampleData));
-    return sampleData;
-  });
 
   // Add global styles
   useEffect(() => {
@@ -626,7 +617,7 @@ function AppContent() {
   return (
     <Routes>
       <Route path="/*" element={
-        user ? <MainAppLayout entries={entries} /> : <LandingPage />
+        user ? <MainAppLayout /> : <LandingPage />
       } />
     </Routes>
   );
@@ -635,7 +626,9 @@ function AppContent() {
 function App() {
   return (
     <UserProvider>
-      <AppContent />
+      <ProgressProvider>
+        <AppContent />
+      </ProgressProvider>
     </UserProvider>
   );
 }

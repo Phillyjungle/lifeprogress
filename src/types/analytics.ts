@@ -1,5 +1,7 @@
 import { LucideIcon, Activity, Brain, Users, Briefcase, Star } from 'lucide-react';
-import { DomainKey } from '../utils/domainUtils';
+import { Entry } from './entry';
+
+export type DomainKey = 'health' | 'mental' | 'social' | 'career' | 'growth';
 
 export interface DomainConfig {
   label: string;
@@ -9,25 +11,29 @@ export interface DomainConfig {
   glowColor: string;
 }
 
-export interface DomainData {
-  [key: string]: number | string;
-  timestamp: string;
-  date: string;
+export interface DomainData extends Omit<Entry, 'notes'> {
+  [key: string]: string | number | undefined;
+  notes?: string;
 }
 
 export interface DomainInsight {
-  trend: {
-    current: number;
-    previous: number;
-    change: number;
-  };
-  average: number;
-  variability: number;
+  domain: DomainKey;
+  insight: string;
+  score?: number;
 }
 
-export interface ChartDataPoint {
-  name: string;
-  [key: string]: string | number;
+export interface VariabilityInsight {
+  level: 'low' | 'moderate' | 'high';
+  score: number;
+  insight: string;
+}
+
+export interface AnalysisResults {
+  correlations: DomainCorrelation[];
+  variabilityInsights: Record<DomainKey, VariabilityInsight>;
+  overallInsight: string;
+  topPerformingDomain: DomainInsight | null;
+  needsAttentionDomain: DomainInsight | null;
 }
 
 export interface DomainChange {
@@ -43,25 +49,6 @@ export interface DomainBalance {
   change: number;
 }
 
-export interface AnalysisResults {
-  correlations: Array<{
-    source: DomainKey;
-    target: DomainKey;
-    correlation: number;
-    strength: number;
-    positive: boolean;
-  }>;
-  variabilityInsights: Record<DomainKey, {
-    level: 'low' | 'moderate' | 'high';
-    score: number;
-    insight: string;
-  }>;
-  overallInsight: string;
-  topPerformingDomain: DomainKey | null;
-  needsAttentionDomain: DomainKey | null;
-  suggestions: string[];
-}
-
 export interface DomainTrend {
   domain: DomainKey;
   trend: 'improving' | 'declining' | 'stable';
@@ -70,12 +57,14 @@ export interface DomainTrend {
 }
 
 export interface DomainCorrelation {
-  source: DomainKey;
-  target: DomainKey;
-  correlation: number;
+  domain1: DomainKey;
+  domain2: DomainKey;
   strength: number;
   positive: boolean;
+  insight: string;
 }
+
+export type DomainSelection = DomainKey | 'all';
 
 export const DOMAIN_CONFIG: Record<string, DomainConfig> = {
   health: {
